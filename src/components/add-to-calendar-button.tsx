@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import { today } from "@/lib/date";
+import { invalidateMealPlans } from "@/lib/meal-plans";
 import { createClient } from "@/lib/supabase/client";
 import { MEAL_LABELS, type Meal } from "@/lib/types";
-import { buttonClass, inputClass, subtleButtonClass } from "./ui";
+import { Spinner, buttonClass, inputClass, subtleButtonClass } from "./ui";
 
 export function AddToCalendarButton({ recipeId }: { recipeId: string }) {
   const [open, setOpen] = useState(false);
@@ -15,6 +16,7 @@ export function AddToCalendarButton({ recipeId }: { recipeId: string }) {
   async function save() {
     setStatus("saving");
     const { error } = await createClient().from("meal_plans").insert({ date, meal, recipe_id: recipeId });
+    if (!error) invalidateMealPlans();
     setStatus(error ? "error" : "done");
     if (!error) setTimeout(() => setOpen(false), 800);
   }
@@ -47,7 +49,7 @@ export function AddToCalendarButton({ recipeId }: { recipeId: string }) {
             <button
               key={m}
               onClick={() => setMeal(m)}
-              className={`flex-1 rounded-full border py-2 ${meal === m ? "border-accent bg-accent-soft font-semibold" : "border-border"}`}
+              className={`pressable flex-1 rounded-full border py-2 ${meal === m ? "border-accent bg-accent-soft font-semibold" : "border-border"}`}
             >
               {MEAL_LABELS[m]}
             </button>
@@ -63,7 +65,8 @@ export function AddToCalendarButton({ recipeId }: { recipeId: string }) {
             onClick={save}
             disabled={!date || status === "saving" || status === "done"}
           >
-            {status === "done" ? "追加しました ✓" : "追加"}
+            {status === "saving" && <Spinner />}
+            {status === "done" ? "追加しました ✓" : status === "saving" ? "追加中…" : "追加"}
           </button>
         </div>
       </div>

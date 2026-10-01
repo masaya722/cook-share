@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Ingredient, RecipeDraft } from "@/lib/types";
-import { buttonClass, inputClass, subtleButtonClass } from "./ui";
+import { Spinner, buttonClass, inputClass, subtleButtonClass } from "./ui";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -17,7 +17,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function RemoveButton({ onClick }: { onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} aria-label="削除" className="shrink-0 px-2 text-xl text-muted">
+    <button type="button" onClick={onClick} aria-label="削除" className="pressable shrink-0 px-2 text-xl text-muted">
       ×
     </button>
   );
@@ -28,6 +28,7 @@ export function RecipeForm({ initial, recipeId }: { initial: RecipeDraft; recipe
   const [draft, setDraft] = useState<RecipeDraft>(initial);
   const [tagsText, setTagsText] = useState(initial.tags.join("、"));
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const set = <K extends keyof RecipeDraft>(key: K, value: RecipeDraft[K]) =>
@@ -85,10 +86,12 @@ export function RecipeForm({ initial, recipeId }: { initial: RecipeDraft; recipe
   async function onDelete() {
     if (!recipeId || !confirm("このレシピを削除しますか？献立からも消えます")) return;
     setSaving(true);
+    setDeleting(true);
     const { error } = await createClient().from("recipes").delete().eq("id", recipeId);
     if (error) {
       setError("削除できませんでした");
       setSaving(false);
+      setDeleting(false);
       return;
     }
     router.replace("/");
@@ -218,11 +221,13 @@ export function RecipeForm({ initial, recipeId }: { initial: RecipeDraft; recipe
       <div className="sticky bottom-20 flex gap-2 pt-2">
         {recipeId && (
           <button type="button" className={subtleButtonClass} onClick={onDelete} disabled={saving}>
-            削除
+            {deleting && <Spinner />}
+            {deleting ? "削除中…" : "削除"}
           </button>
         )}
         <button type="submit" className={`${buttonClass} flex-1 py-3 shadow-lg`} disabled={saving}>
-          {saving ? "保存中…" : "保存"}
+          {saving && !deleting && <Spinner />}
+          {saving && !deleting ? "保存中…" : "保存"}
         </button>
       </div>
     </form>

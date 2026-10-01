@@ -25,9 +25,9 @@ export async function proxy(request: NextRequest) {
     },
   );
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // getUser() は毎回 Supabase Auth に問い合わせるが、getClaims() は署名鍵で手元検証するので速い
+  const { data } = await supabase.auth.getClaims();
+  const user = data?.claims;
 
   const { pathname } = request.nextUrl;
   if (!user && pathname !== "/login" && !pathname.startsWith("/api/")) {

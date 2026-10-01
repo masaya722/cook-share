@@ -53,3 +53,17 @@ textarea,
 select {
   font-size: 16px;
 }
+
+/* 押した瞬間に少し縮んで暗くなる。押したことが指先で分かるように */
+.pressable {
+  transition:
+    transform 120ms ease,
+    opacity 120ms ease,
+    background-color 120ms ease;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.pressable:active:not(:disabled) {
+  transform: scale(0.96);
+  opacity: 0.75;
+}

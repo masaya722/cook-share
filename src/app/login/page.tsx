@@ -2,7 +2,7 @@
 
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
-import { buttonClass, inputClass } from "@/components/ui";
+import { Spinner, buttonClass, inputClass } from "@/components/ui";
 import { createClient } from "@/lib/supabase/client";
 
 function LoginForm() {
@@ -49,6 +49,7 @@ function LoginForm() {
       />
       {error && <p className="text-sm text-accent">{error}</p>}
       <button type="submit" className={`${buttonClass} py-3`} disabled={loading}>
+        {loading && <Spinner />}
         {loading ? "ログイン中…" : "ログイン"}
       </button>
     </form>

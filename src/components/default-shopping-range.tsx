@@ -2,8 +2,9 @@
 
 import { useToday } from "@/lib/use-today";
 import { ShoppingList } from "./shopping-list";
+import { ShoppingSkeleton } from "./skeletons";
 
 export function DefaultShoppingRange() {
   const t = useToday();
-  return t ? <ShoppingList from={t} to={t} /> : null;
+  return t ? <ShoppingList from={t} to={t} /> : <ShoppingSkeleton />;
 }

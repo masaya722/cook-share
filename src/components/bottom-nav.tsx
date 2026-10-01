@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState } from "react";
 
 const TABS = [
   {
@@ -28,16 +29,20 @@ const TABS = [
 
 export function BottomNav() {
   const pathname = usePathname();
+  // 押したタブを画面遷移の完了を待たずに光らせる。遷移が終わったら（pathname が変わったら）通常の判定に戻る
+  const [tapped, setTapped] = useState<{ href: string; from: string } | null>(null);
+  const pendingHref = tapped?.from === pathname ? tapped.href : null;
   return (
     <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
       <ul className="mx-auto flex max-w-2xl">
         {TABS.map((tab) => {
-          const active = tab.match(pathname);
+          const active = pendingHref ? pendingHref === tab.href : tab.match(pathname);
           return (
             <li key={tab.href} className="flex-1">
               <Link
                 href={tab.href}
-                className={`flex flex-col items-center gap-0.5 py-2 text-[11px] ${active ? "text-accent" : "text-muted"}`}
+                onClick={() => setTapped({ href: tab.href, from: pathname })}
+                className={`pressable flex flex-col items-center gap-0.5 py-2 text-[11px] ${active ? "text-accent" : "text-muted"}`}
               >
                 <svg
                   viewBox="0 0 24 24"

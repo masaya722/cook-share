@@ -4,9 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Recipe } from "@/lib/types";
 import { RecipeThumb } from "./recipe-thumb";
-import { inputClass } from "./ui";
+import { Skeleton, inputClass } from "./ui";
 
-type PickerRecipe = Pick<Recipe, "id" | "title" | "image_url" | "tags">;
+export type PickerRecipe = Pick<Recipe, "id" | "title" | "image_url" | "tags">;
+
+// 2 回目以降は前回の一覧をすぐ出し、裏で最新にする
+let recipeCache: PickerRecipe[] | null = null;
 
 export function RecipePicker({
   title,
@@ -14,10 +17,10 @@ export function RecipePicker({
   onClose,
 }: {
   title: string;
-  onPick: (recipeId: string) => void;
+  onPick: (recipe: PickerRecipe) => void;
   onClose: () => void;
 }) {
-  const [recipes, setRecipes] = useState<PickerRecipe[] | null>(null);
+  const [recipes, setRecipes] = useState<PickerRecipe[] | null>(recipeCache);
   const [query, setQuery] = useState("");
 
   useEffect(() => {
@@ -25,7 +28,11 @@ export function RecipePicker({
       .from("recipes")
       .select("id, title, image_url, tags")
       .order("updated_at", { ascending: false })
-      .then(({ data }) => setRecipes((data ?? []) as PickerRecipe[]));
+      .then(({ data }) => {
+        if (!data) return;
+        recipeCache = data as PickerRecipe[];
+        setRecipes(recipeCache);
+      });
   }, []);
 
   const filtered = useMemo(() => {
@@ -42,7 +49,7 @@ export function RecipePicker({
       >
         <div className="flex items-center justify-between p-5 pb-3">
           <h2 className="text-lg font-bold">{title}</h2>
-          <button onClick={onClose} className="text-muted">
+          <button onClick={onClose} className="pressable text-muted">
             閉じる
           </button>
         </div>
@@ -56,13 +63,19 @@ export function RecipePicker({
           />
         </div>
         <ul className="mt-3 flex-1 overflow-y-auto px-5 pb-5">
-          {filtered === null && <li className="py-6 text-center text-muted">読み込み中…</li>}
+          {filtered === null &&
+            Array.from({ length: 5 }, (_, i) => (
+              <li key={i} className="flex items-center gap-3 border-b border-border py-2">
+                <Skeleton className="h-12 w-16 shrink-0 rounded-lg" />
+                <Skeleton className="h-4 flex-1" />
+              </li>
+            ))}
           {filtered?.length === 0 && <li className="py-6 text-center text-muted">レシピがありません</li>}
           {filtered?.map((r) => (
             <li key={r.id}>
               <button
-                onClick={() => onPick(r.id)}
-                className="flex w-full items-center gap-3 border-b border-border py-2 text-left"
+                onClick={() => onPick(r)}
+                className="pressable flex w-full items-center gap-3 border-b border-border py-2 text-left"
               >
                 <RecipeThumb src={r.image_url} className="h-12 w-16 shrink-0 rounded-lg" />
                 <span className="line-clamp-2 text-sm">{r.title}</span>

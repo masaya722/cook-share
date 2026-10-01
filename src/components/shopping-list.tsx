@@ -1,13 +1,13 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { addDays, formatShort } from "@/lib/date";
 import { aggregateIngredients, ingredientKey } from "@/lib/shopping";
-import { fetchMealPlans } from "@/lib/meal-plans";
+import { cachedMealPlans, fetchMealPlans } from "@/lib/meal-plans";
 import { MEAL_LABELS, type MealPlan } from "@/lib/types";
 import { useToday } from "@/lib/use-today";
-import { subtleButtonClass } from "./ui";
+import { ShoppingSkeleton } from "./skeletons";
+import { Skeleton, subtleButtonClass } from "./ui";
 
 function readChecked(storageKey: string): Set<string> {
   try {
@@ -20,13 +20,38 @@ function readChecked(storageKey: string): Set<string> {
 export function ShoppingList({ from, to }: { from: string; to: string }) {
   // チェック状態は端末に保存しているので、サーバーでは描画せず端末側だけで描く
   const t = useToday();
-  if (!t) return null;
-  return <ShoppingListBody key={`${from}:${to}`} from={from} to={to} today={t} />;
+  // 期間の切り替えはサーバーを通さず端末内で行う（URL だけ書き換えて、再読み込みしても同じ期間を開けるようにする）
+  const [range, setRange] = useState({ from, to });
+  if (!t) return <ShoppingSkeleton />;
+
+  function selectRange(next: { from: string; to: string }) {
+    setRange(next);
+    window.history.replaceState(null, "", `/shopping?from=${next.from}&to=${next.to}`);
+  }
+
+  return (
+    <ShoppingListBody
+      key={`${range.from}:${range.to}`}
+      from={range.from}
+      to={range.to}
+      today={t}
+      onSelectRange={selectRange}
+    />
+  );
 }
 
-function ShoppingListBody({ from, to, today: t }: { from: string; to: string; today: string }) {
-  const router = useRouter();
-  const [plans, setPlans] = useState<MealPlan[] | null>(null);
+function ShoppingListBody({
+  from,
+  to,
+  today: t,
+  onSelectRange,
+}: {
+  from: string;
+  to: string;
+  today: string;
+  onSelectRange: (range: { from: string; to: string }) => void;
+}) {
+  const [plans, setPlans] = useState<MealPlan[] | null>(() => cachedMealPlans(from, to));
   const storageKey = `shopping-checked:${from}:${to}`;
   const [checked, setChecked] = useState<Set<string>>(() => readChecked(storageKey));
   const [loadError, setLoadError] = useState(false);
@@ -98,8 +123,8 @@ function ShoppingListBody({ from, to, today: t }: { from: string; to: string; to
           return (
             <button
               key={p.label}
-              onClick={() => router.replace(`/shopping?from=${p.from}&to=${p.to}`)}
-              className={`shrink-0 rounded-full border px-4 py-1.5 text-sm ${
+              onClick={() => onSelectRange({ from: p.from, to: p.to })}
+              className={`pressable shrink-0 rounded-full border px-4 py-1.5 text-sm ${
                 active ? "border-accent bg-accent text-accent-foreground" : "border-border bg-surface"
               }`}
             >
@@ -112,10 +137,18 @@ function ShoppingListBody({ from, to, today: t }: { from: string; to: string; to
         {from === to ? formatShort(from) : `${formatShort(from)} 〜 ${formatShort(to)}`} の献立
       </p>
 
-      {plans === null ? (
-        <p className="mt-10 text-center text-muted">
-          {loadError ? "読み込めませんでした。通信状況を確認して開き直してください" : "読み込み中…"}
-        </p>
+      {plans === null && loadError ? (
+        <p className="mt-10 text-center text-muted">読み込めませんでした。通信状況を確認して開き直してください</p>
+      ) : plans === null ? (
+        <div className="mt-5 flex flex-col divide-y divide-border rounded-2xl border border-border bg-surface">
+          {Array.from({ length: 5 }, (_, i) => (
+            <div key={i} className="flex items-center gap-3 px-4 py-3.5">
+              <Skeleton className="h-5 w-5 rounded-md" />
+              <Skeleton className="h-4 flex-1" />
+              <Skeleton className="h-4 w-12" />
+            </div>
+          ))}
+        </div>
       ) : plans.length === 0 ? (
         <p className="mt-10 text-center text-muted">この期間の献立はまだありません</p>
       ) : (
@@ -142,7 +175,7 @@ function ShoppingListBody({ from, to, today: t }: { from: string; to: string; to
               const done = checked.has(ingredientKey(item.name));
               return (
                 <li key={item.name}>
-                  <label className="flex cursor-pointer items-start gap-3 px-4 py-3">
+                  <label className="pressable flex cursor-pointer items-start gap-3 px-4 py-3">
                     <input
                       type="checkbox"
                       checked={done}

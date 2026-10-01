@@ -50,7 +50,7 @@ export function RecipeList({ recipes }: { recipes: RecipeSummary[] }) {
             <button
               key={t}
               onClick={() => setTag(tag === t ? null : t)}
-              className={`shrink-0 rounded-full border px-3 py-1 text-sm ${
+              className={`pressable shrink-0 rounded-full border px-3 py-1 text-sm ${
                 tag === t ? "border-accent bg-accent text-accent-foreground" : "border-border bg-surface"
               }`}
             >
@@ -63,7 +63,7 @@ export function RecipeList({ recipes }: { recipes: RecipeSummary[] }) {
       <ul className="mt-4 grid grid-cols-2 gap-3">
         {filtered.map((r) => (
           <li key={r.id}>
-            <Link href={`/recipes/${r.id}`} className="block overflow-hidden rounded-2xl border border-border bg-surface">
+            <Link href={`/recipes/${r.id}`} className="pressable block overflow-hidden rounded-2xl border border-border bg-surface">
               <RecipeThumb src={r.image_url} sourceType={r.source_type} className="aspect-[4/3]" />
               <div className="p-2.5">
                 <p className="line-clamp-2 text-sm font-semibold leading-snug">{r.title}</p>

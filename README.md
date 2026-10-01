@@ -32,6 +32,16 @@
 
 [Claude Console](https://platform.claude.com/) で API キーを発行する。取り込み 1 件あたり数円程度。
 
+### 2.5 YouTube Data API キー（推奨）
+
+Vercel などのサーバーから YouTube のページを直接読むと、ボット判定されて概要欄が取れないことがある。公式 API を使うと確実に取れる（個人利用なら無料枠で足りる）。
+
+1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクトを作成
+2. 「API とサービス」→「ライブラリ」で **YouTube Data API v3** を有効化
+3. 「認証情報」→「認証情報を作成」→「API キー」
+4. 作成したキーの編集画面で「API の制限」を **YouTube Data API v3** のみにする
+5. `YOUTUBE_API_KEY` として設定する
+
 ### 3. ローカルで動かす
 
 ```bash
@@ -43,7 +53,7 @@ npm run dev
 ### 4. Vercel にデプロイ
 
 1. このリポジトリを GitHub に push し、[Vercel](https://vercel.com) で Import（Hobby プランで可）
-2. Environment Variables に `.env.example` の 3 つを設定してデプロイ
+2. Environment Variables に `.env.example` の値（`YOUTUBE_API_KEY` を含む）を設定してデプロイ
 
 ## スマホへのインストール
 
@@ -57,6 +67,6 @@ npm run dev
 
 ## 補足
 
-- 字幕は YouTube 側の制限でサーバーから取れないことがある。その場合は概要欄だけで読み取るので、概要欄にレシピがない動画は手直しが必要
+- 字幕は YouTube 側の制限でサーバーから取れないことが多い。概要欄と、概要欄にある「作り方はこちら」のリンク先ページから読み取るので、どちらにもレシピがない動画は手直しが必要
 - 買い物リストのチェック状態は端末ごとに保存される
 - 材料の合算は「大さじ2」「200g」のように単位が同じものだけを足し、「少々」などはそのまま並べる

@@ -130,32 +130,103 @@ async function fetchTranscript(tracks: CaptionTrack[]): Promise<string | null> {
   }
 }
 
-async function fetchYoutube(url: string, videoId: string): Promise<SourceContent> {
+type VideoInfo = { title: string; description: string; tracks: CaptionTrack[] };
+
+/** YouTube Data API で取得する。データセンター（Vercel）からでもブロックされない */
+async function fetchVideoViaApi(videoId: string): Promise<VideoInfo | null> {
+  const key = process.env.YOUTUBE_API_KEY;
+  if (!key) return null;
+  try {
+    const api = new URL("https://www.googleapis.com/youtube/v3/videos");
+    api.searchParams.set("part", "snippet");
+    api.searchParams.set("id", videoId);
+    api.searchParams.set("key", key);
+    const res = await fetch(api, { signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) {
+      console.error("YouTube Data API error", res.status, await res.text());
+      return null;
+    }
+    const snippet = (await res.json()).items?.[0]?.snippet;
+    if (!snippet) return null;
+    // 字幕の取得には OAuth が必要なので API では取らない
+    return { title: snippet.title ?? "", description: snippet.description ?? "", tracks: [] };
+  } catch (err) {
+    console.error("YouTube Data API error", err);
+    return null;
+  }
+}
+
+/** 動画ページを直接読む。サーバーの IP によってはボット判定されて中身が返らない */
+async function fetchVideoViaPage(videoId: string): Promise<VideoInfo> {
   const watchUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
   const html = await fetchText(watchUrl, { cookie: "CONSENT=YES+1" });
-
-  let title = metaContent(html, "og:title") ?? "";
-  let description = "";
-  let tracks: CaptionTrack[] = [];
 
   const m = /ytInitialPlayerResponse\s*=\s*(\{[\s\S]+?\})\s*;\s*(?:var\s|<\/script>)/.exec(html);
   if (m) {
     try {
       const player = JSON.parse(m[1]);
-      title = player.videoDetails?.title ?? title;
-      description = player.videoDetails?.shortDescription ?? "";
-      tracks = player.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [];
+      return {
+        title: player.videoDetails?.title ?? metaContent(html, "og:title") ?? "",
+        description: player.videoDetails?.shortDescription ?? "",
+        tracks: player.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [],
+      };
     } catch {
       // YouTube 側の形式が変わっていても、メタタグの情報で続行する
     }
   }
-  if (!description) description = metaContent(html, "og:description") ?? "";
+  return {
+    title: metaContent(html, "og:title") ?? "",
+    description: metaContent(html, "og:description") ?? "",
+    tracks: [],
+  };
+}
 
-  const transcript = await fetchTranscript(tracks);
+// レシピではないことが明らかなリンク先（通販・SNS など）
+const NON_RECIPE_HOSTS =
+  /(^|\.)(amazon\.[a-z.]+|amzn\.to|amzn\.asia|rakuten\.co\.jp|youtube\.com|youtu\.be|instagram\.com|tiktok\.com|twitter\.com|x\.com|facebook\.com|line\.me|lin\.ee|linktr\.ee|note\.com)$/i;
+
+/** 概要欄の「詳しい作り方はこちら↓」のようなリンクを探す */
+export function findRecipeLink(description: string): string | null {
+  const lines = description.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    for (const raw of lines[i].match(/https?:\/\/[^\s）)」』]+/g) ?? []) {
+      if (!URL.canParse(raw)) continue;
+      if (NON_RECIPE_HOSTS.test(new URL(raw).hostname)) continue;
+      const context = `${lines[i - 1] ?? ""} ${lines[i]}`;
+      if (/作り方|レシピ|recipe/i.test(context)) return raw;
+    }
+  }
+  return null;
+}
+
+async function fetchLinkedRecipe(description: string): Promise<string | null> {
+  const link = findRecipeLink(description);
+  if (!link) return null;
+  try {
+    const page = await fetchWeb(link);
+    const body = page.jsonLdRecipe ? JSON.stringify(page.jsonLdRecipe) : page.text.slice(0, 20_000);
+    return `【概要欄のリンク先ページ】${link}\nタイトル: ${page.title}\n${body}`;
+  } catch {
+    // リンク先が読めなくても概要欄だけで続行する
+    return null;
+  }
+}
+
+async function fetchYoutube(url: string, videoId: string): Promise<SourceContent> {
+  const info = (await fetchVideoViaApi(videoId)) ?? (await fetchVideoViaPage(videoId));
+  if (!info.description && !info.title) {
+    throw new Error("YouTube から動画の情報を取得できませんでした。少し時間をおくか、手入力で登録してください");
+  }
+
+  const [transcript, linked] = await Promise.all([
+    fetchTranscript(info.tracks),
+    fetchLinkedRecipe(info.description),
+  ]);
   const text = [
-    `【動画タイトル】\n${title}`,
-    `【概要欄】\n${description || "（なし）"}`,
+    `【動画タイトル】\n${info.title}`,
+    `【概要欄】\n${info.description || "（なし）"}`,
     transcript ? `【字幕】\n${transcript}` : null,
+    linked,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -163,7 +234,7 @@ async function fetchYoutube(url: string, videoId: string): Promise<SourceContent
   return {
     kind: "youtube",
     url,
-    title,
+    title: info.title,
     imageUrl: `https://i.ytimg.com/vi/${encodeURIComponent(videoId)}/hqdefault.jpg`,
     text,
     jsonLdRecipe: null,

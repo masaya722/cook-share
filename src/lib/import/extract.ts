@@ -8,12 +8,16 @@ const ExtractedRecipe = z.object({
   is_recipe: z.boolean().describe("料理のレシピ（材料や作り方）が含まれていれば true"),
   title: z.string(),
   description: z.string().describe("どんな料理かを1〜2文で"),
-  servings: z.string().describe("例: 2人分。不明なら空文字"),
+  servings: z
+    .number()
+    .int()
+    .describe("材料が何人分か。「2人分」「材料(1人前)」などの記載から数字だけ。幅があれば少ない方。記載がなければ 0"),
   cook_time: z.string().describe("例: 30分。不明なら空文字"),
   ingredients: z.array(
     z.object({
-      name: z.string().describe("材料名のみ。例: 玉ねぎ"),
+      food: z.string().describe("店で買うときの食材名。部位や種類も含める。例: 豚ばら肉, 鶏もも肉, 玉ねぎ"),
       amount: z.string().describe("分量。例: 1個, 大さじ2, 200g, 少々。不明なら空文字"),
+      preparation: z.string().describe("下ごしらえ。例: みじん切り, 薄切り, すりおろし。なければ空文字"),
     }),
   ),
   steps: z.array(z.string()).describe("作り方。1要素1手順"),
@@ -22,8 +26,12 @@ const ExtractedRecipe = z.object({
 
 const SYSTEM_PROMPT = `あなたは料理レシピの整理係です。与えられた Web ページや YouTube 動画の情報から、家庭で作るためのレシピを日本語で抜き出してください。
 
-- 材料は名前と分量を分けてください。「A」「★」などの合わせ調味料の記号は外し、材料名だけにしてください。
+- 材料は「食材」「分量」「下ごしらえ」に分けてください。
+  - 食材は、店で買うときの名前にします。部位や種類は食材に含めます（例: 「豚肉（ロース）」→ 豚ロース肉、「鶏肉（もも）」→ 鶏もも肉）。部位が書かれていなければ、書かれていないまま（豚肉）にしてください。
+  - みじん切り・薄切り・すりおろし・室温に戻す など、買った後の扱いは下ごしらえに分けます（例: 「ニンニク(微塵切り)」→ 食材: ニンニク、下ごしらえ: 微塵切り）。
+  - 「A」「★」などの合わせ調味料の記号は外してください。
 - 分量は元の表記を尊重し、「大さじ2」「200g」「1/2個」のように数字を含む形で書いてください。
+- 何人分かは、「2人分」「4人前」「材料(1人前)」「Serves 4」や構造化データの recipeYield などの記載を探してください。見つからなければ 0 にし、推測しないでください。
 - 作り方は、元の情報にある手順を簡潔に並べてください。字幕しかない場合は話の内容から手順を組み立ててください。
 - 情報源に書かれていない材料や分量を推測で足さないでください。
 - YouTube の概要欄のリンク先ページが動画と同じ料理なら、材料や手順の補完に使ってください。別の料理なら無視してください。
@@ -70,10 +78,12 @@ export async function extractRecipe(source: SourceContent): Promise<RecipeDraft>
     source_url: source.url,
     source_type: source.kind,
     image_url: source.imageUrl,
-    servings: parsed.servings || null,
+    servings: parsed.servings > 0 ? parsed.servings : null,
     cook_time: parsed.cook_time || null,
     description: parsed.description || null,
-    ingredients: parsed.ingredients.filter((i) => i.name.trim()),
+    ingredients: parsed.ingredients
+      .filter((i) => i.food.trim())
+      .map((i) => ({ name: i.food.trim(), amount: i.amount.trim(), preparation: i.preparation.trim() })),
     steps: parsed.steps.filter((s) => s.trim()),
     tags: parsed.tags,
     memo: null,

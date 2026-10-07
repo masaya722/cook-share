@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { RecipeForm } from "@/components/recipe-form";
 import { PageHeader } from "@/components/ui";
+import { Servings } from "@/domain/recipe/servings";
 import { createClient } from "@/lib/supabase/server";
 import type { Recipe, RecipeDraft } from "@/lib/types";
 
@@ -16,7 +17,11 @@ export default async function EditRecipePage({ params }: { params: Promise<{ id:
     source_url: recipe.source_url,
     source_type: recipe.source_type,
     image_url: recipe.image_url,
-    servings: recipe.servings,
+    // 第 4 段階より前の文字列（「2人分」）が残っていても数値にして渡す
+    servings:
+      typeof recipe.servings === "string"
+        ? (({ count, assumed }) => (assumed ? null : count))(Servings.parse(recipe.servings))
+        : recipe.servings,
     cook_time: recipe.cook_time,
     description: recipe.description,
     ingredients: recipe.ingredients,

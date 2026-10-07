@@ -5,9 +5,11 @@ import { useState } from "react";
 import { deleteRecipeAction, upcomingUsesOfRecipeAction } from "@/app/actions";
 import { MEAL_TIME_LABELS } from "@/domain/menu/meal";
 import { formatShort, today } from "@/lib/date";
+import { normalizeIngredientRows } from "@/infrastructure/recipe-mapper";
 import { invalidateMeals } from "@/lib/meals";
 import { createClient } from "@/lib/supabase/client";
 import type { Ingredient, RecipeDraft } from "@/lib/types";
+import { ServingsStepper } from "./servings-stepper";
 import { Spinner, buttonClass, inputClass, subtleButtonClass } from "./ui";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -29,7 +31,11 @@ function RemoveButton({ onClick }: { onClick: () => void }) {
 
 export function RecipeForm({ initial, recipeId }: { initial: RecipeDraft; recipeId?: string }) {
   const router = useRouter();
-  const [draft, setDraft] = useState<RecipeDraft>(initial);
+  // 古い形式の材料（「ニンニク(微塵切り)」）は、開いた時点で食材と下ごしらえに分けておく
+  const [draft, setDraft] = useState<RecipeDraft>(() => ({
+    ...initial,
+    ingredients: normalizeIngredientRows(initial.ingredients),
+  }));
   const [tagsText, setTagsText] = useState(initial.tags.join("、"));
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -67,7 +73,7 @@ export function RecipeForm({ initial, recipeId }: { initial: RecipeDraft; recipe
       ...draft,
       title: draft.title.trim(),
       ingredients: draft.ingredients
-        .map((i) => ({ name: i.name.trim(), amount: i.amount.trim() }))
+        .map((i) => ({ name: i.name.trim(), amount: i.amount.trim(), preparation: (i.preparation ?? "").trim() }))
         .filter((i) => i.name),
       steps: draft.steps.map((s) => s.trim()).filter(Boolean),
       tags: [...new Set(tagsText.split(/[、,\s]+/).map((t) => t.trim()).filter(Boolean))],
@@ -130,48 +136,71 @@ export function RecipeForm({ initial, recipeId }: { initial: RecipeDraft; recipe
         />
       </Field>
 
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="分量">
-          <input
-            className={inputClass}
-            placeholder="2人分"
-            value={draft.servings ?? ""}
-            onChange={(e) => set("servings", e.target.value || null)}
-          />
-        </Field>
-        <Field label="調理時間">
-          <input
-            className={inputClass}
-            placeholder="30分"
-            value={draft.cook_time ?? ""}
-            onChange={(e) => set("cook_time", e.target.value || null)}
-          />
-        </Field>
-      </div>
+      <section className="flex flex-col gap-1">
+        <span className="text-sm font-semibold text-muted">何人分のレシピか</span>
+        <div className="flex min-h-11 items-center justify-between rounded-xl border border-border bg-surface px-3 py-1.5">
+          {draft.servings === null ? (
+            <>
+              <span className="text-sm text-muted">記載なし（2人分とみなします）</span>
+              <button type="button" className="pressable text-sm text-accent" onClick={() => set("servings", 2)}>
+                人数を入れる
+              </button>
+            </>
+          ) : (
+            <>
+              <ServingsStepper value={draft.servings} onChange={(n) => set("servings", n)} />
+              <button type="button" className="pressable text-xs text-muted" onClick={() => set("servings", null)}>
+                記載なしにする
+              </button>
+            </>
+          )}
+        </div>
+      </section>
+
+      <Field label="調理時間">
+        <input
+          className={inputClass}
+          placeholder="30分"
+          value={draft.cook_time ?? ""}
+          onChange={(e) => set("cook_time", e.target.value || null)}
+        />
+      </Field>
 
       <section className="flex flex-col gap-2">
         <span className="text-sm font-semibold text-muted">材料</span>
+        <span className="text-xs text-muted">食材は店で買う名前で（部位も書く: 豚ばら肉、鶏もも肉）。みじん切りなどは下ごしらえへ</span>
         {draft.ingredients.map((ing, i) => (
-          <div key={i} className="flex items-center gap-2">
+          <div key={i} className="flex flex-col gap-1.5 rounded-xl border border-border p-2">
+            <div className="flex items-center gap-2">
+              <input
+                className={`${inputClass} min-w-0 flex-[3]`}
+                placeholder="食材（豚ばら肉）"
+                aria-label="食材"
+                value={ing.name}
+                onChange={(e) => setIngredient(i, { name: e.target.value })}
+              />
+              <input
+                className={`${inputClass} min-w-0 flex-[2]`}
+                placeholder="分量（200g）"
+                aria-label="分量"
+                value={ing.amount}
+                onChange={(e) => setIngredient(i, { amount: e.target.value })}
+              />
+              <RemoveButton onClick={() => set("ingredients", draft.ingredients.filter((_, j) => j !== i))} />
+            </div>
             <input
-              className={`${inputClass} flex-[3]`}
-              placeholder="玉ねぎ"
-              value={ing.name}
-              onChange={(e) => setIngredient(i, { name: e.target.value })}
+              className={`${inputClass} py-1.5 text-sm`}
+              placeholder="下ごしらえ（任意: みじん切り、薄切り など）"
+              aria-label="下ごしらえ"
+              value={ing.preparation ?? ""}
+              onChange={(e) => setIngredient(i, { preparation: e.target.value })}
             />
-            <input
-              className={`${inputClass} flex-[2]`}
-              placeholder="1個"
-              value={ing.amount}
-              onChange={(e) => setIngredient(i, { amount: e.target.value })}
-            />
-            <RemoveButton onClick={() => set("ingredients", draft.ingredients.filter((_, j) => j !== i))} />
           </div>
         ))}
         <button
           type="button"
           className={subtleButtonClass}
-          onClick={() => set("ingredients", [...draft.ingredients, { name: "", amount: "" }])}
+          onClick={() => set("ingredients", [...draft.ingredients, { name: "", amount: "", preparation: "" }])}
         >
           ＋ 材料を追加
         </button>

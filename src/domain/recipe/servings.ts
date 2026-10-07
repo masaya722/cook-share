@@ -16,6 +16,11 @@ export const Servings = {
     return { count, assumed: false };
   },
 
+  /** 保存されている人数から作る。null（記載なし）は 2 人分とみなす */
+  fromCount(count: number | null | undefined): Servings {
+    return count && count > 0 ? Servings.of(count) : Servings.assumed();
+  },
+
   assumed(): Servings {
     return { count: HOUSEHOLD_SERVINGS, assumed: true };
   },

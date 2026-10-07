@@ -1,6 +1,11 @@
+/**
+ * 材料（DB の recipes.ingredients の 1 要素）。name は食材（店で買う物としての名前）。
+ * 第 4 段階より前のデータには preparation が無く、name に下ごしらえが混ざっていることがある。
+ */
 export type Ingredient = {
   name: string;
   amount: string;
+  preparation?: string;
 };
 
 export type SourceType = "youtube" | "web" | "manual";
@@ -11,7 +16,8 @@ export type Recipe = {
   source_url: string | null;
   source_type: SourceType;
   image_url: string | null;
-  servings: string | null;
+  /** 基準人数。記載がなければ null（2 人分とみなす） */
+  servings: number | null;
   cook_time: string | null;
   description: string | null;
   ingredients: Ingredient[];

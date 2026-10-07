@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { AddToCalendarButton } from "@/components/add-to-calendar-button";
 import { RecipeThumb } from "@/components/recipe-thumb";
 import { PageHeader, subtleButtonClass } from "@/components/ui";
+import { Servings } from "@/domain/recipe/servings";
+import { normalizeIngredientRows } from "@/infrastructure/recipe-mapper";
 import { createClient } from "@/lib/supabase/server";
 import type { Recipe } from "@/lib/types";
 
@@ -12,6 +14,11 @@ export default async function RecipePage({ params }: { params: Promise<{ id: str
   const { data } = await supabase.from("recipes").select("*").eq("id", id).maybeSingle();
   if (!data) notFound();
   const recipe = data as Recipe;
+  // 古い形式の材料（下ごしらえが食材名に混ざっている）も、食材と下ごしらえに分けて見せる
+  const ingredients = normalizeIngredientRows(recipe.ingredients);
+  const servingsLabel = Servings.label(
+    typeof recipe.servings === "string" ? Servings.parse(recipe.servings) : Servings.fromCount(recipe.servings),
+  );
 
   return (
     <>
@@ -34,7 +41,7 @@ export default async function RecipePage({ params }: { params: Promise<{ id: str
       {recipe.description && <p className="mt-2 text-sm text-muted">{recipe.description}</p>}
 
       <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-        {recipe.servings && <span className="rounded-full bg-accent-soft px-3 py-1">🍽 {recipe.servings}</span>}
+        <span className="rounded-full bg-accent-soft px-3 py-1">🍽 {servingsLabel}</span>
         {recipe.cook_time && <span className="rounded-full bg-accent-soft px-3 py-1">⏱ {recipe.cook_time}</span>}
         {recipe.tags.map((t) => (
           <span key={t} className="rounded-full border border-border px-3 py-1 text-muted">
@@ -58,9 +65,12 @@ export default async function RecipePage({ params }: { params: Promise<{ id: str
           <p className="text-sm text-muted">未登録</p>
         ) : (
           <ul className="divide-y divide-border rounded-2xl border border-border bg-surface">
-            {recipe.ingredients.map((ing, i) => (
+            {ingredients.map((ing, i) => (
               <li key={i} className="flex justify-between gap-4 px-4 py-2.5">
-                <span>{ing.name}</span>
+                <span>
+                  {ing.name}
+                  {ing.preparation && <span className="ml-1 text-sm text-muted">（{ing.preparation}）</span>}
+                </span>
                 <span className="shrink-0 text-muted">{ing.amount}</span>
               </li>
             ))}

@@ -14,7 +14,7 @@
 ### 1. Supabase
 
 1. [supabase.com](https://supabase.com) でプロジェクトを作成（無料プランで十分）
-2. **SQL Editor** で [`supabase/migrations/0001_init.sql`](supabase/migrations/0001_init.sql) を実行
+2. **SQL Editor** で [`supabase/migrations/`](supabase/migrations/) の SQL を番号順にすべて実行
 3. **Authentication → Sign In / Providers** で「Allow new users to sign up」をオフにする
 4. **Authentication → Users → Add user** で 2 人分のユーザーを作成（「Auto Confirm User」にチェック）
 5. SQL Editor で 2 人をメンバー登録する（ここに登録されたユーザーだけがデータを読み書きできる）
@@ -68,7 +68,7 @@ npm run dev
 ## 補足
 
 - 字幕は YouTube 側の制限でサーバーから取れないことが多い。概要欄と、概要欄にある「作り方はこちら」のリンク先ページから読み取るので、どちらにもレシピがない動画は手直しが必要
-- 買い物リストのチェック状態は端末ごとに保存される
+- 買い物リストは家族で 1 枚。献立に入れたレシピの材料が自動で入り、献立から外すと消える。買った物は翌日に消える
 - 材料の合算は「大さじ2」「200g」のように単位が同じものだけを足し、「少々」などはそのまま並べる
 
 ## ライセンス

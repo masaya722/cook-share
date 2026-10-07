@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { planDishAction } from "@/app/actions";
 import { today } from "@/lib/date";
 import { invalidateMealPlans } from "@/lib/meal-plans";
-import { createClient } from "@/lib/supabase/client";
 import { MEAL_LABELS, type Meal } from "@/lib/types";
 import { Spinner, buttonClass, inputClass, subtleButtonClass } from "./ui";
 
@@ -12,13 +12,16 @@ export function AddToCalendarButton({ recipeId }: { recipeId: string }) {
   const [date, setDate] = useState("");
   const [meal, setMeal] = useState<Meal>("dinner");
   const [status, setStatus] = useState<"idle" | "saving" | "done" | "error">("idle");
+  const [error, setError] = useState("");
 
   async function save() {
     setStatus("saving");
-    const { error } = await createClient().from("meal_plans").insert({ date, meal, recipe_id: recipeId });
-    if (!error) invalidateMealPlans();
-    setStatus(error ? "error" : "done");
-    if (!error) setTimeout(() => setOpen(false), 800);
+    // 献立に入れると、材料が自動で買い物リストに入る
+    const result = await planDishAction({ date, mealTime: meal, recipeId });
+    if (result.ok) invalidateMealPlans();
+    else setError(result.error);
+    setStatus(result.ok ? "done" : "error");
+    if (result.ok) setTimeout(() => setOpen(false), 800);
   }
 
   if (!open) {
@@ -55,7 +58,7 @@ export function AddToCalendarButton({ recipeId }: { recipeId: string }) {
             </button>
           ))}
         </div>
-        {status === "error" && <p className="mt-3 text-sm text-accent">保存できませんでした</p>}
+        {status === "error" && <p className="mt-3 text-sm text-accent">{error}</p>}
         <div className="mt-5 flex gap-2">
           <button className={`${subtleButtonClass} flex-1`} onClick={() => setOpen(false)}>
             閉じる

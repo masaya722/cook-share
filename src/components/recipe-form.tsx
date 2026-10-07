@@ -2,6 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { deleteRecipeAction } from "@/app/actions";
+import { invalidateMealPlans } from "@/lib/meal-plans";
 import { createClient } from "@/lib/supabase/client";
 import type { Ingredient, RecipeDraft } from "@/lib/types";
 import { Spinner, buttonClass, inputClass, subtleButtonClass } from "./ui";
@@ -84,12 +86,14 @@ export function RecipeForm({ initial, recipeId }: { initial: RecipeDraft; recipe
   }
 
   async function onDelete() {
-    if (!recipeId || !confirm("このレシピを削除しますか？献立からも消えます")) return;
+    if (!recipeId || !confirm("このレシピを削除しますか？献立と買い物リストからも消えます")) return;
     setSaving(true);
     setDeleting(true);
-    const { error } = await createClient().from("recipes").delete().eq("id", recipeId);
-    if (error) {
-      setError("削除できませんでした");
+    // 献立からも消え、まだ買っていない材料は買い物リストからも消える
+    const result = await deleteRecipeAction(recipeId);
+    invalidateMealPlans();
+    if (!result.ok) {
+      setError(result.error);
       setSaving(false);
       setDeleting(false);
       return;

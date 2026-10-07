@@ -77,24 +77,34 @@ export function CalendarSkeleton() {
   );
 }
 
+export function ShoppingRowsSkeleton() {
+  return (
+    <div className="mt-5 flex flex-col divide-y divide-border rounded-2xl border border-border bg-surface">
+      {Array.from({ length: 6 }, (_, i) => (
+        <div key={i} className="flex items-center gap-3 px-4 py-3.5">
+          <Skeleton className="h-5 w-5 rounded-md" />
+          <Skeleton className="h-4 flex-1" />
+          <Skeleton className="h-4 w-12" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function ShoppingSkeleton() {
   return (
     <>
       <div className="flex gap-2">
+        <Skeleton className="h-11 flex-[3]" />
+        <Skeleton className="h-11 flex-[2]" />
+        <Skeleton className="h-10 w-12 rounded-full" />
+      </div>
+      <div className="mt-4 flex gap-2">
         {Array.from({ length: 4 }, (_, i) => (
           <Skeleton key={i} className="h-9 w-16 rounded-full" />
         ))}
       </div>
-      <Skeleton className="mt-3 h-4 w-32" />
-      <div className="mt-5 flex flex-col divide-y divide-border rounded-2xl border border-border bg-surface">
-        {Array.from({ length: 6 }, (_, i) => (
-          <div key={i} className="flex items-center gap-3 px-4 py-3.5">
-            <Skeleton className="h-5 w-5 rounded-md" />
-            <Skeleton className="h-4 flex-1" />
-            <Skeleton className="h-4 w-12" />
-          </div>
-        ))}
-      </div>
+      <ShoppingRowsSkeleton />
     </>
   );
 }

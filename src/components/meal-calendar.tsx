@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { planDishAction, removeDishAction } from "@/app/actions";
 import { useEffect, useState } from "react";
 import { addDays, formatShort, weekdayIndex } from "@/lib/date";
 import { cachedMealPlans, fetchMealPlans, invalidateMealPlans } from "@/lib/meal-plans";
-import { createClient } from "@/lib/supabase/client";
 import { MEAL_LABELS, type Meal, type MealPlan } from "@/lib/types";
 import { useToday } from "@/lib/use-today";
 import { RecipePicker, type PickerRecipe } from "./recipe-picker";
@@ -65,11 +65,10 @@ function WeekView({ todayKey }: { todayKey: string }) {
     };
     setLoaded({ start, plans: [...(plans ?? []), temp] });
 
-    const { error } = await createClient()
-      .from("meal_plans")
-      .insert({ date: target.date, meal: target.meal, recipe_id: recipe.id });
+    // 献立に入れると、材料が自動で買い物リストに入る
+    const result = await planDishAction({ date: target.date, mealTime: target.meal, recipeId: recipe.id });
     invalidateMealPlans();
-    if (error) setActionError("献立を追加できませんでした。もう一度試してください");
+    if (!result.ok) setActionError(result.error);
     try {
       setLoaded({ start, plans: await fetchMealPlans(start, end) });
     } catch {
@@ -80,13 +79,15 @@ function WeekView({ todayKey }: { todayKey: string }) {
   async function remove(id: string) {
     setActionError(null);
     setLoaded((l) => l && { ...l, plans: l.plans.filter((x) => x.id !== id) });
-    const { error } = await createClient().from("meal_plans").delete().eq("id", id);
+    // 献立から外すと、まだ買っていない材料が買い物リストから消える
+    const result = await removeDishAction(id);
     invalidateMealPlans();
-    if (error) {
-      setActionError("献立から外せませんでした。もう一度試してください");
+    if (!result.ok) {
+      setActionError(result.error);
       setLoaded({ start, plans: await fetchMealPlans(start, end) });
     }
   }
+
 
   return (
     <>
@@ -170,10 +171,10 @@ function WeekView({ todayKey }: { todayKey: string }) {
       </ul>
 
       <Link
-        href={`/shopping?from=${start}&to=${end}`}
+        href="/shopping"
         className={`${subtleButtonClass} mt-4 w-full py-3`}
       >
-        この週の買い物リストを見る
+        買い物リストを見る
       </Link>
 
       {picking && (

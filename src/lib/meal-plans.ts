@@ -17,7 +17,7 @@ export function invalidateMealPlans() {
 export async function fetchMealPlans(from: string, to: string): Promise<MealPlan[]> {
   const { data, error } = await createClient()
     .from("meal_plans")
-    .select("id, date, meal, recipe_id, recipes(id, title, image_url, ingredients)")
+    .select("id, date, meal, recipe_id, recipes(id, title, image_url, ingredients, servings)")
     .gte("date", from)
     .lte("date", to)
     .order("date")

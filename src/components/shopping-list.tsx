@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { addDays, formatShort } from "@/lib/date";
-import { aggregateIngredients, ingredientKey } from "@/lib/shopping";
+import { shoppingRowsFromPlans } from "@/lib/shopping";
 import { cachedMealPlans, fetchMealPlans } from "@/lib/meal-plans";
 import { MEAL_LABELS, type MealPlan } from "@/lib/types";
 import { useToday } from "@/lib/use-today";
@@ -71,18 +71,9 @@ function ShoppingListBody({
     };
   }, [from, to]);
 
-  const items = useMemo(
-    () =>
-      aggregateIngredients(
-        (plans ?? [])
-          .filter((p) => p.recipes)
-          .map((p) => ({ recipeTitle: p.recipes!.title, ingredients: p.recipes!.ingredients })),
-      ),
-    [plans],
-  );
+  const items = useMemo(() => shoppingRowsFromPlans(plans ?? [], t), [plans, t]);
 
-  function toggle(name: string) {
-    const key = ingredientKey(name);
+  function toggle(key: string) {
     const next = new Set(checked);
     if (next.has(key)) next.delete(key);
     else next.add(key);
@@ -96,8 +87,8 @@ function ShoppingListBody({
 
   async function copyAsText() {
     const text = items
-      .filter((i) => !checked.has(ingredientKey(i.name)))
-      .map((i) => `・${i.name}${i.amount ? ` ${i.amount}` : ""}`)
+      .filter((i) => !checked.has(i.key))
+      .map((i) => `・${i.foodName}${i.quantityText ? ` ${i.quantityText}` : ""}`)
       .join("\n");
     await navigator.clipboard.writeText(text);
     setCopied(true);
@@ -111,9 +102,7 @@ function ShoppingListBody({
     { label: "1週間", from: t, to: addDays(t, 6) },
   ];
 
-  const sorted = [...items].sort(
-    (a, b) => Number(checked.has(ingredientKey(a.name))) - Number(checked.has(ingredientKey(b.name))),
-  );
+  const sorted = [...items].sort((a, b) => Number(checked.has(a.key)) - Number(checked.has(b.key)));
 
   return (
     <>
@@ -172,22 +161,22 @@ function ShoppingListBody({
 
           <ul className="divide-y divide-border rounded-2xl border border-border bg-surface">
             {sorted.map((item) => {
-              const done = checked.has(ingredientKey(item.name));
+              const done = checked.has(item.key);
               return (
-                <li key={item.name}>
+                <li key={item.key}>
                   <label className="pressable flex cursor-pointer items-start gap-3 px-4 py-3">
                     <input
                       type="checkbox"
                       checked={done}
-                      onChange={() => toggle(item.name)}
+                      onChange={() => toggle(item.key)}
                       className="mt-1 h-5 w-5 shrink-0 accent-[var(--accent)]"
                     />
                     <span className={`min-w-0 flex-1 ${done ? "text-muted line-through" : ""}`}>
                       <span className="flex justify-between gap-3">
-                        <span className="font-medium">{item.name}</span>
-                        <span className="shrink-0">{item.amount}</span>
+                        <span className="font-medium">{item.foodName}</span>
+                        <span className="shrink-0">{item.quantityText}</span>
                       </span>
-                      <span className="block truncate text-xs text-muted">{item.recipes.join("・")}</span>
+                      <span className="block truncate text-xs text-muted">{item.recipeTitles.join("・")}</span>
                     </span>
                   </label>
                 </li>

@@ -61,7 +61,7 @@ function WeekView({ todayKey }: { todayKey: string }) {
       date: target.date,
       meal: target.meal,
       recipe_id: recipe.id,
-      recipes: { id: recipe.id, title: recipe.title, image_url: recipe.image_url, ingredients: [] },
+      recipes: { id: recipe.id, title: recipe.title, image_url: recipe.image_url, ingredients: [], servings: null },
     };
     setLoaded({ start, plans: [...(plans ?? []), temp] });
 

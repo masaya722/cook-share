@@ -42,7 +42,7 @@ export type MealPlan = {
   date: string;
   meal: Meal;
   recipe_id: string;
-  recipes: Pick<Recipe, "id" | "title" | "image_url" | "ingredients"> | null;
+  recipes: Pick<Recipe, "id" | "title" | "image_url" | "ingredients" | "servings"> | null;
 };
 
 export function emptyDraft(): RecipeDraft {

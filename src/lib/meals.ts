@@ -37,12 +37,13 @@ export type LeftoverCandidate = {
   recipe: RecipeCard | null;
 };
 
-// meals と dishes は 2 通りでつながるので、使う外部キーを明示する
+// meals と dishes は 2 通りでつながるので、使う外部キーを明示する。
+// leftovers 側はつながり方が 1 通りなので指定しない（「!leftovers_...」は PostgREST が「!left」結合と読んでしまう）
 const MEAL_SELECT = `
   id, date, meal_time, eating_out,
   dishes!dishes_meal_id_fkey(id, recipe_id, servings_to_cook, created_at, recipe:recipes(id, title, image_url)),
-  leftovers!leftovers_meal_id_fkey(source_dish_id, created_at,
-    source:dishes!leftovers_source_dish_id_fkey(id, recipe:recipes(id, title, image_url)))
+  leftovers(source_dish_id, created_at,
+    source:dishes(id, recipe:recipes(id, title, image_url)))
 `;
 
 // タブを行き来したときに前回の結果をすぐ出すための、端末内だけのキャッシュ

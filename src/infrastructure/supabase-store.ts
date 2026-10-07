@@ -8,11 +8,12 @@ import type { Recipe as RecipeRow } from "@/lib/types";
 import { toDomainRecipe } from "./recipe-mapper";
 import { type ShoppingItemRow, toShoppingItem, toShoppingItemRow } from "./shopping-item-mapper";
 
-// meals と dishes は「食事の品」と「残り物（leftovers 経由）」の 2 通りでつながるので、使う外部キーを明示する
+// meals と dishes は「食事の品」と「残り物（leftovers 経由）」の 2 通りでつながるので、使う外部キーを明示する。
+// leftovers 側はつながり方が 1 通りなので指定しない（「!leftovers_...」は PostgREST が「!left」結合と読んでしまう）
 const MEAL_SELECT = `
   id, date, meal_time, eating_out,
   dishes!dishes_meal_id_fkey(id, recipe_id, servings_to_cook, created_at),
-  leftovers!leftovers_meal_id_fkey(source_dish_id, created_at, source:dishes!leftovers_source_dish_id_fkey(recipe_id))
+  leftovers(source_dish_id, created_at, source:dishes(recipe_id))
 `;
 
 type MealRow = {

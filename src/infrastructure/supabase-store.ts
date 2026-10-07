@@ -1,20 +1,48 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { PlannedDish, Store } from "@/application/store";
-import type { MealTime } from "@/domain/menu/meal";
+import type { Store } from "@/application/store";
+import { type DishId, type DishInMeal, Meal, type MealTime } from "@/domain/menu/meal";
+import type { RecipeId } from "@/domain/recipe/recipe";
 import type { CalendarDate } from "@/domain/shared/calendar-date";
 import { ShoppingList } from "@/domain/shopping/shopping-list";
 import type { Recipe as RecipeRow } from "@/lib/types";
 import { toDomainRecipe } from "./recipe-mapper";
 import { type ShoppingItemRow, toShoppingItem, toShoppingItemRow } from "./shopping-item-mapper";
 
-type MealPlanRow = { id: string; date: string; meal: MealTime; recipe_id: string };
+// meals と dishes は「食事の品」と「残り物（leftovers 経由）」の 2 通りでつながるので、使う外部キーを明示する
+const MEAL_SELECT = `
+  id, date, meal_time, eating_out,
+  dishes!dishes_meal_id_fkey(id, recipe_id, servings_to_cook, created_at),
+  leftovers!leftovers_meal_id_fkey(source_dish_id, created_at, source:dishes!leftovers_source_dish_id_fkey(recipe_id))
+`;
 
-const toDish = (r: MealPlanRow): PlannedDish => ({
-  id: r.id,
-  date: r.date as CalendarDate,
-  mealTime: r.meal,
-  recipeId: r.recipe_id,
-});
+type MealRow = {
+  id: string;
+  date: string;
+  meal_time: MealTime;
+  eating_out: boolean;
+  dishes: { id: string; recipe_id: string; servings_to_cook: number; created_at: string }[];
+  leftovers: { source_dish_id: string; created_at: string; source: { recipe_id: string } | null }[];
+};
+
+const byCreatedAt = (a: { created_at: string }, b: { created_at: string }) => a.created_at.localeCompare(b.created_at);
+
+function toMeal(row: MealRow): Meal {
+  return Meal.reconstitute({
+    id: row.id,
+    date: row.date as CalendarDate,
+    mealTime: row.meal_time,
+    eatingOut: row.eating_out,
+    dishes: [...row.dishes].sort(byCreatedAt).map((d) => ({
+      id: d.id as DishId,
+      recipeId: d.recipe_id as RecipeId,
+      servingsToCook: d.servings_to_cook,
+    })),
+    leftovers: [...row.leftovers]
+      .sort(byCreatedAt)
+      .filter((l) => l.source)
+      .map((l) => ({ sourceDishId: l.source_dish_id as DishId, recipeId: l.source!.recipe_id as RecipeId })),
+  });
+}
 
 function check<T>({ data, error }: { data: T; error: { message: string } | null }): T {
   if (error) throw new Error(error.message);
@@ -32,26 +60,49 @@ export class SupabaseStore implements Store {
     return row ? toDomainRecipe(row as Pick<RecipeRow, "id" | "title" | "servings" | "ingredients">) : null;
   }
 
-  async loadDish(id: string) {
-    const row = check(await this.db.from("meal_plans").select("id, date, meal, recipe_id").eq("id", id).maybeSingle());
-    return row ? toDish(row as MealPlanRow) : null;
-  }
-
-  async loadDishesOfMeal(date: CalendarDate, mealTime: MealTime) {
-    const rows = check(
-      await this.db.from("meal_plans").select("id, date, meal, recipe_id").eq("date", date).eq("meal", mealTime),
+  async loadMeal(date: CalendarDate, mealTime: MealTime) {
+    const row = check(
+      await this.db.from("meals").select(MEAL_SELECT).eq("date", date).eq("meal_time", mealTime).maybeSingle(),
     );
-    return (rows as MealPlanRow[]).map(toDish);
+    return row ? toMeal(row as unknown as MealRow) : null;
   }
 
-  async loadDishesOfRecipe(recipeId: string) {
-    const rows = check(await this.db.from("meal_plans").select("id, date, meal, recipe_id").eq("recipe_id", recipeId));
-    return (rows as MealPlanRow[]).map(toDish);
+  private async loadMealsByIds(ids: string[]) {
+    if (ids.length === 0) return [];
+    const rows = check(await this.db.from("meals").select(MEAL_SELECT).in("id", [...new Set(ids)]));
+    return (rows as unknown as MealRow[]).map(toMeal);
   }
 
-  async loadDishesFrom(date: CalendarDate) {
-    const rows = check(await this.db.from("meal_plans").select("id, date, meal, recipe_id").gte("date", date));
-    return (rows as MealPlanRow[]).map(toDish);
+  async loadMealOfDish(dishId: string) {
+    const row = check(await this.db.from("dishes").select("meal_id").eq("id", dishId).maybeSingle());
+    return row ? ((await this.loadMealsByIds([row.meal_id]))[0] ?? null) : null;
+  }
+
+  async loadMealsWithDishesOfRecipe(recipeId: string) {
+    const rows = check(await this.db.from("dishes").select("meal_id").eq("recipe_id", recipeId));
+    return this.loadMealsByIds((rows ?? []).map((r) => r.meal_id));
+  }
+
+  async loadMealsWithLeftoversOf(dishIds: readonly string[]) {
+    if (dishIds.length === 0) return [];
+    const rows = check(await this.db.from("leftovers").select("meal_id").in("source_dish_id", [...dishIds]));
+    return this.loadMealsByIds((rows ?? []).map((r) => r.meal_id));
+  }
+
+  async loadDishesFrom(date: CalendarDate): Promise<DishInMeal[]> {
+    const rows = check(
+      await this.db
+        .from("dishes")
+        .select("id, recipe_id, servings_to_cook, meal:meals!dishes_meal_id_fkey!inner(date, meal_time)")
+        .gte("meal.date", date),
+    ) as unknown as { id: string; recipe_id: string; servings_to_cook: number; meal: { date: string; meal_time: MealTime } }[];
+    return rows.map((r) => ({
+      id: r.id as DishId,
+      recipeId: r.recipe_id as RecipeId,
+      servingsToCook: r.servings_to_cook,
+      date: r.meal.date as CalendarDate,
+      mealTime: r.meal.meal_time,
+    }));
   }
 
   async loadShoppingList() {
@@ -70,17 +121,22 @@ export class SupabaseStore implements Store {
   }
 
   async save(changes: Parameters<Store["save"]>[0]) {
+    const meals = changes.meals ?? [];
     check(
-      await this.db.rpc("save_menu_and_shopping", {
+      await this.db.rpc("save_meals_and_shopping", {
         changes: {
-          meal_plans_insert: (changes.menu?.dishesInsert ?? []).map((d) => ({
-            id: d.id,
-            date: d.date,
-            meal: d.mealTime,
-            recipe_id: d.recipeId,
-          })),
-          meal_plans_delete: changes.menu?.dishesDelete ?? [],
-          recipes_delete: changes.menu?.recipesDelete ?? [],
+          meals_save: meals
+            .filter((m) => !m.isEmpty)
+            .map((m) => ({
+              id: m.id,
+              date: m.date,
+              meal_time: m.mealTime,
+              eating_out: m.eatingOut,
+              dishes: m.dishes.map((d) => ({ id: d.id, recipe_id: d.recipeId, servings_to_cook: d.servingsToCook })),
+              leftovers: m.leftovers.map((l) => ({ source_dish_id: l.sourceDishId })),
+            })),
+          meals_delete: meals.filter((m) => m.isEmpty).map((m) => m.id),
+          recipes_delete: changes.recipesDelete ?? [],
           items_upsert: (changes.shopping?.upserted ?? []).map(toShoppingItemRow),
           items_delete: changes.shopping?.removedIds ?? [],
           mark_backfilled: changes.markBackfilled ?? false,

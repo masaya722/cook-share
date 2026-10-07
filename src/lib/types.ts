@@ -29,22 +29,6 @@ export type RecipeSummary = Pick<
 
 export type RecipeDraft = Omit<Recipe, "id" | "created_at" | "updated_at">;
 
-export type Meal = "breakfast" | "lunch" | "dinner";
-
-export const MEAL_LABELS: Record<Meal, string> = {
-  breakfast: "朝",
-  lunch: "昼",
-  dinner: "夜",
-};
-
-export type MealPlan = {
-  id: string;
-  date: string;
-  meal: Meal;
-  recipe_id: string;
-  recipes: Pick<Recipe, "id" | "title" | "image_url" | "ingredients" | "servings"> | null;
-};
-
 export function emptyDraft(): RecipeDraft {
   return {
     title: "",

@@ -1,91 +1,145 @@
-import { type DishId, Meal, type MealTime } from "@/domain/menu/meal";
+import { type DishId, type DishInMeal, Meal, type MealTime, type MenuEvent } from "@/domain/menu/meal";
 import type { Recipe, RecipeId } from "@/domain/recipe/recipe";
 import { HOUSEHOLD_SERVINGS } from "@/domain/recipe/servings";
-import type { CalendarDate } from "@/domain/shared/calendar-date";
+import { type CalendarDate, compareDates } from "@/domain/shared/calendar-date";
 import { DomainError } from "@/domain/shared/domain-error";
 import { applyMenuEvents } from "@/domain/shopping/menu-policy";
-import type { ShoppingItem, ShoppingItemId } from "@/domain/shopping/shopping-list";
-import type { PlannedDish, Store } from "./store";
+import type { ShoppingItem, ShoppingItemId, ShoppingList } from "@/domain/shopping/shopping-list";
+import type { Store } from "./store";
 
-/** 今の献立テーブルから食事を組み立てる（品はすべて 2 人分。作る人数は第 3 段階で持たせる） */
-function mealOf(date: CalendarDate, mealTime: MealTime, dishes: PlannedDish[]): Meal {
-  return Meal.reconstitute({
-    id: `${date}:${mealTime}`,
-    date,
-    mealTime,
-    eatingOut: false,
-    dishes: dishes.map((d) => ({
-      id: d.id as DishId,
-      recipeId: d.recipeId as RecipeId,
-      servingsToCook: HOUSEHOLD_SERVINGS,
-    })),
-    leftovers: [],
-  });
-}
+/** 新しく作るものの id。テストでは決まった値を渡せるようにする */
+export type NewId = () => string;
 
-async function recipeLoader(store: Store) {
+async function recipesFor(store: Store, events: readonly MenuEvent[]) {
   const recipes = new Map<string, Recipe>();
-  return {
-    async preload(ids: string[]) {
-      for (const id of new Set(ids)) {
-        if (recipes.has(id)) continue;
-        const recipe = await store.loadRecipe(id);
-        if (!recipe) throw new DomainError("レシピが見つかりません");
-        recipes.set(id, recipe);
-      }
-    },
-    get: (id: RecipeId) => recipes.get(id)!,
-  };
+  for (const e of events) {
+    if (e.type !== "DishAdded" || recipes.has(e.recipeId)) continue;
+    const recipe = await store.loadRecipe(e.recipeId);
+    if (!recipe) throw new DomainError("レシピが見つかりません");
+    recipes.set(e.recipeId, recipe);
+  }
+  return (id: RecipeId) => recipes.get(id)!;
 }
 
-/** 献立に品を加える。材料は自動で買い物リストに入る */
+/**
+ * 献立を変える操作の共通の流れ:
+ * 食事を変える → 外れた品を残り物にしていた食事からも外す（M7）→ 買い物リストに反映 → まとめて保存
+ */
+async function changeMeals(store: Store, meals: Meal[], extra: { recipesDelete?: string[] } = {}) {
+  const events = meals.flatMap((m) => m.pullEvents());
+
+  const removedDishIds = events.filter((e) => e.type === "DishRemoved").map((e) => e.dishId);
+  const affected: Meal[] = [];
+  if (removedDishIds.length > 0) {
+    for (const other of await store.loadMealsWithLeftoversOf(removedDishIds)) {
+      const meal = meals.find((m) => m.id === other.id) ?? other;
+      for (const id of removedDishIds) meal.removeLeftover(id);
+      meal.pullEvents();
+      if (!meals.includes(meal)) affected.push(meal);
+    }
+  }
+
+  const [list, recipeOf] = await Promise.all([store.loadShoppingList(), recipesFor(store, events)]);
+  applyMenuEvents(list, events, recipeOf);
+
+  await store.save({ meals: [...meals, ...affected], shopping: list.pullChanges(), ...extra });
+}
+
+async function mealAt(store: Store, date: CalendarDate, mealTime: MealTime, newId: NewId) {
+  return (await store.loadMeal(date, mealTime)) ?? Meal.plan(newId(), date, mealTime);
+}
+
+async function mealOfDish(store: Store, dishId: string) {
+  const meal = await store.loadMealOfDish(dishId);
+  if (!meal) throw new DomainError("この品は献立にありません");
+  return meal;
+}
+
+/** 献立に品を加える。材料は作る人数に合わせて自動で買い物リストに入る */
 export async function planDish(
   store: Store,
-  input: { dishId: string; date: CalendarDate; mealTime: MealTime; recipeId: string },
+  input: { date: CalendarDate; mealTime: MealTime; recipeId: string; servingsToCook?: number },
+  newId: NewId,
 ) {
-  const [existing, list, recipes] = await Promise.all([
-    store.loadDishesOfMeal(input.date, input.mealTime),
-    store.loadShoppingList(),
-    recipeLoader(store),
-  ]);
-  await recipes.preload([input.recipeId]);
-
-  const meal = mealOf(input.date, input.mealTime, existing);
-  meal.addDish(input.dishId, input.recipeId as RecipeId);
-  applyMenuEvents(list, meal.pullEvents(), recipes.get);
-
-  await store.save({
-    menu: { dishesInsert: [{ id: input.dishId, date: input.date, mealTime: input.mealTime, recipeId: input.recipeId }] },
-    shopping: list.pullChanges(),
-  });
+  const meal = await mealAt(store, input.date, input.mealTime, newId);
+  meal.addDish(newId(), input.recipeId as RecipeId, input.servingsToCook ?? HOUSEHOLD_SERVINGS);
+  await changeMeals(store, [meal]);
 }
 
-/** 献立から品を外す。その品の材料のうち、まだ買っていない物は買い物リストから消える */
+/** 献立から品を外す。まだ買っていない材料は買い物リストから消え、この品の残り物も外れる */
 export async function removeDish(store: Store, dishId: string) {
-  const dish = await store.loadDish(dishId);
-  if (!dish) return;
-  const [dishes, list] = await Promise.all([
-    store.loadDishesOfMeal(dish.date, dish.mealTime),
-    store.loadShoppingList(),
-  ]);
-
-  const meal = mealOf(dish.date, dish.mealTime, dishes);
+  const meal = await store.loadMealOfDish(dishId);
+  if (!meal) return;
   meal.removeDish(dishId as DishId);
-  applyMenuEvents(list, meal.pullEvents(), () => {
-    throw new Error("品を外すときにレシピは使わない");
-  });
-
-  await store.save({ menu: { dishesDelete: [dishId] }, shopping: list.pullChanges() });
+  await changeMeals(store, [meal]);
 }
 
-/** レシピを削除する。献立からも消え、まだ買っていない材料も買い物リストから消える */
+/** 作る人数を変える。買い物リストの分量も合わせて変わる */
+export async function changeServings(store: Store, dishId: string, servingsToCook: number) {
+  const meal = await mealOfDish(store, dishId);
+  if (servingsToCook <= HOUSEHOLD_SERVINGS) {
+    const usedAsLeftover = await store.loadMealsWithLeftoversOf([dishId]);
+    if (usedAsLeftover.length > 0) {
+      throw new DomainError("残り物として献立に入れている日があります。先にその残り物を外してください");
+    }
+  }
+  meal.changeServings(dishId as DishId, servingsToCook);
+  await changeMeals(store, [meal]);
+}
+
+/** 外食にする。並んでいた品と残り物は外れ、まだ買っていない材料は買い物リストから消える */
+export async function markEatingOut(store: Store, input: { date: CalendarDate; mealTime: MealTime }, newId: NewId) {
+  const meal = await mealAt(store, input.date, input.mealTime, newId);
+  meal.markEatingOut();
+  await changeMeals(store, [meal]);
+}
+
+export async function cancelEatingOut(store: Store, input: { date: CalendarDate; mealTime: MealTime }) {
+  const meal = await store.loadMeal(input.date, input.mealTime);
+  if (!meal) return;
+  meal.cancelEatingOut();
+  await changeMeals(store, [meal]);
+}
+
+/** 前の食事で多めに作った品を、残り物として献立に入れる（買い物は増えない） */
+export async function addLeftover(
+  store: Store,
+  input: { date: CalendarDate; mealTime: MealTime; sourceDishId: string },
+  newId: NewId,
+) {
+  const sourceMeal = await mealOfDish(store, input.sourceDishId);
+  const sourceDish = sourceMeal.dishes.find((d) => d.id === input.sourceDishId)!;
+  const meal = await mealAt(store, input.date, input.mealTime, newId);
+  meal.addLeftover({ ...sourceDish, date: sourceMeal.date, mealTime: sourceMeal.mealTime });
+  await changeMeals(store, [meal]);
+}
+
+export async function removeLeftover(
+  store: Store,
+  input: { date: CalendarDate; mealTime: MealTime; sourceDishId: string },
+) {
+  const meal = await store.loadMeal(input.date, input.mealTime);
+  if (!meal) return;
+  meal.removeLeftover(input.sourceDishId as DishId);
+  await changeMeals(store, [meal]);
+}
+
+/** R5: 今日以降の献立でこのレシピを使っている食事（削除前の確認に使う） */
+export async function upcomingUsesOfRecipe(store: Store, recipeId: string, today: CalendarDate) {
+  const meals = await store.loadMealsWithDishesOfRecipe(recipeId);
+  return meals
+    .filter((m) => compareDates(m.date, today) >= 0)
+    .map((m) => ({ date: m.date, mealTime: m.mealTime }))
+    .sort((a, b) => compareDates(a.date, b.date));
+}
+
+/** レシピを削除する。献立からも消え、まだ買っていない材料は買い物リストからも消える */
 export async function deleteRecipe(store: Store, recipeId: string) {
-  const [dishes, list] = await Promise.all([store.loadDishesOfRecipe(recipeId), store.loadShoppingList()]);
-  for (const dish of dishes) list.removeDish(dish.id as DishId);
-  await store.save({
-    menu: { dishesDelete: dishes.map((d) => d.id), recipesDelete: [recipeId] },
-    shopping: list.pullChanges(),
-  });
+  const meals = await store.loadMealsWithDishesOfRecipe(recipeId);
+  for (const meal of meals) {
+    for (const dish of meal.dishes.filter((d) => d.recipeId === recipeId)) meal.removeDish(dish.id);
+  }
+  await changeMeals(store, meals, { recipesDelete: [recipeId] });
 }
 
 /**
@@ -95,17 +149,7 @@ export async function deleteRecipe(store: Store, recipeId: string) {
  */
 export async function openShoppingList(store: Store, today: CalendarDate): Promise<ShoppingItem[]> {
   const [list, backfilled] = await Promise.all([store.loadShoppingList(), store.isShoppingListBackfilled()]);
-
-  if (!backfilled) {
-    const dishes = await store.loadDishesFrom(today);
-    const recipes = await recipeLoader(store);
-    await recipes.preload(dishes.map((d) => d.recipeId));
-    for (const dish of dishes) {
-      const meal = mealOf(dish.date, dish.mealTime, []);
-      meal.addDish(dish.id, dish.recipeId as RecipeId);
-      applyMenuEvents(list, meal.pullEvents(), recipes.get);
-    }
-  }
+  if (!backfilled) await backfill(store, list, await store.loadDishesFrom(today));
   list.purgeBought(today);
 
   const changes = list.pullChanges();
@@ -113,6 +157,18 @@ export async function openShoppingList(store: Store, today: CalendarDate): Promi
     await store.save({ shopping: changes, markBackfilled: !backfilled });
   }
   return [...list.all()];
+}
+
+async function backfill(store: Store, list: ShoppingList, dishes: DishInMeal[]) {
+  const events: MenuEvent[] = dishes.map((d) => ({
+    type: "DishAdded",
+    dishId: d.id,
+    recipeId: d.recipeId,
+    servingsToCook: d.servingsToCook,
+    date: d.date,
+    mealTime: d.mealTime,
+  }));
+  applyMenuEvents(list, events, await recipesFor(store, events));
 }
 
 /** 牛乳・バナナ・代わりの食材などを手で足す */

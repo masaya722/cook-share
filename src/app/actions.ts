@@ -38,19 +38,43 @@ function mealTime(value: string): MealTime {
   return value as MealTime;
 }
 
-export async function planDishAction(input: { date: string; mealTime: string; recipeId: string }) {
+const newId = () => crypto.randomUUID();
+
+type MealSlot = { date: string; mealTime: string };
+const slot = (input: MealSlot) => ({ date: calendarDate(input.date), mealTime: mealTime(input.mealTime) });
+
+export async function planDishAction(input: MealSlot & { recipeId: string; servingsToCook?: number }) {
   return run((store) =>
-    useCases.planDish(store, {
-      dishId: crypto.randomUUID(),
-      date: calendarDate(input.date),
-      mealTime: mealTime(input.mealTime),
-      recipeId: input.recipeId,
-    }),
+    useCases.planDish(store, { ...slot(input), recipeId: input.recipeId, servingsToCook: input.servingsToCook }, newId),
   );
 }
 
 export async function removeDishAction(dishId: string) {
   return run((store) => useCases.removeDish(store, dishId));
+}
+
+export async function changeServingsAction(dishId: string, servingsToCook: number) {
+  return run((store) => useCases.changeServings(store, dishId, servingsToCook));
+}
+
+export async function markEatingOutAction(input: MealSlot) {
+  return run((store) => useCases.markEatingOut(store, slot(input), newId));
+}
+
+export async function cancelEatingOutAction(input: MealSlot) {
+  return run((store) => useCases.cancelEatingOut(store, slot(input)));
+}
+
+export async function addLeftoverAction(input: MealSlot & { sourceDishId: string }) {
+  return run((store) => useCases.addLeftover(store, { ...slot(input), sourceDishId: input.sourceDishId }, newId));
+}
+
+export async function removeLeftoverAction(input: MealSlot & { sourceDishId: string }) {
+  return run((store) => useCases.removeLeftover(store, { ...slot(input), sourceDishId: input.sourceDishId }));
+}
+
+export async function upcomingUsesOfRecipeAction(recipeId: string, today: string) {
+  return run((store) => useCases.upcomingUsesOfRecipe(store, recipeId, calendarDate(today)));
 }
 
 export async function deleteRecipeAction(recipeId: string) {

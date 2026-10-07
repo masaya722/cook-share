@@ -2,8 +2,10 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { deleteRecipeAction } from "@/app/actions";
-import { invalidateMealPlans } from "@/lib/meal-plans";
+import { deleteRecipeAction, upcomingUsesOfRecipeAction } from "@/app/actions";
+import { MEAL_TIME_LABELS } from "@/domain/menu/meal";
+import { formatShort, today } from "@/lib/date";
+import { invalidateMeals } from "@/lib/meals";
 import { createClient } from "@/lib/supabase/client";
 import type { Ingredient, RecipeDraft } from "@/lib/types";
 import { Spinner, buttonClass, inputClass, subtleButtonClass } from "./ui";
@@ -86,12 +88,23 @@ export function RecipeForm({ initial, recipeId }: { initial: RecipeDraft; recipe
   }
 
   async function onDelete() {
-    if (!recipeId || !confirm("このレシピを削除しますか？献立と買い物リストからも消えます")) return;
+    if (!recipeId) return;
     setSaving(true);
     setDeleting(true);
+    // R5: 今日以降の献立で使っていれば、どの日かを見せてから確認する
+    const uses = await upcomingUsesOfRecipeAction(recipeId, today()).catch(() => null);
+    const upcoming =
+      uses?.ok && uses.value.length > 0
+        ? `${uses.value.map((u) => `${formatShort(u.date)} ${MEAL_TIME_LABELS[u.mealTime]}`).join("、")} の献立に入っています。\n`
+        : "";
+    if (!confirm(`${upcoming}このレシピを削除しますか？献立と買い物リストからも消えます`)) {
+      setSaving(false);
+      setDeleting(false);
+      return;
+    }
     // 献立からも消え、まだ買っていない材料は買い物リストからも消える
     const result = await deleteRecipeAction(recipeId);
-    invalidateMealPlans();
+    invalidateMeals();
     if (!result.ok) {
       setError(result.error);
       setSaving(false);

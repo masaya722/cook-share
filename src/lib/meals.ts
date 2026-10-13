@@ -1,4 +1,5 @@
-import { LEFTOVER_KEEP_DAYS, MEAL_TIMES, type MealTime } from "@/domain/menu/meal";
+import { LEFTOVER_KEEP_DAYS, type MealTime, whyNotLeftover } from "@/domain/menu/meal";
+import { HOUSEHOLD_SERVINGS } from "@/domain/recipe/servings";
 import { addDays, type CalendarDate, compareDates } from "@/domain/shared/calendar-date";
 import { createClient } from "./supabase/client";
 
@@ -78,12 +79,12 @@ export async function fetchMeals(from: CalendarDate, to: CalendarDate): Promise<
   return meals;
 }
 
-/** この食事より前の 1 週間に、多めに（2 人より多く）作った品 */
+/** この食事の残り物にできる品。どの品が候補になるかはドメインの判定（whyNotLeftover）で決め、問い合わせは件数を絞るだけ */
 export async function fetchLeftoverCandidates(date: CalendarDate, mealTime: MealTime): Promise<LeftoverCandidate[]> {
   const { data, error } = await createClient()
     .from("dishes")
     .select("id, servings_to_cook, recipe:recipes(id, title, image_url), meal:meals!dishes_meal_id_fkey!inner(date, meal_time)")
-    .gt("servings_to_cook", 2)
+    .gt("servings_to_cook", HOUSEHOLD_SERVINGS)
     .gte("meal.date", addDays(date, -LEFTOVER_KEEP_DAYS))
     .lte("meal.date", date);
   if (error) throw error;
@@ -101,9 +102,12 @@ export async function fetchLeftoverCandidates(date: CalendarDate, mealTime: Meal
       meal_time: r.meal.meal_time,
       recipe: r.recipe,
     }))
-    .filter((c) => {
-      const byDate = compareDates(c.date, date);
-      return byDate < 0 || (byDate === 0 && MEAL_TIMES.indexOf(c.meal_time) < MEAL_TIMES.indexOf(mealTime));
-    })
+    .filter(
+      (c) =>
+        whyNotLeftover(
+          { date: c.date, mealTime: c.meal_time, servingsToCook: c.servings_to_cook },
+          { date, mealTime },
+        ) === null,
+    )
     .sort((a, b) => compareDates(b.date, a.date));
 }

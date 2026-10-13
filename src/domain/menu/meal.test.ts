@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { RecipeId } from "../recipe/recipe";
 import { calendarDate } from "../shared/calendar-date";
 import { DomainError } from "../shared/domain-error";
-import { type DishId, type DishInMeal, Meal } from "./meal";
+import { type DishId, type DishInMeal, Meal, whyNotLeftover } from "./meal";
 
 const curry = "curry" as RecipeId;
 const salad = "salad" as RecipeId;
@@ -106,5 +106,22 @@ describe("残り物", () => {
     next.addLeftover(curryCookedFor(4));
     next.markEatingOut();
     expect(next.leftovers).toHaveLength(0);
+  });
+});
+
+describe("残り物にできるかの判定（入れるときと候補の一覧で共通）", () => {
+  const source = { date: day("2026-10-08"), mealTime: "dinner" as const, servingsToCook: 4 };
+
+  it("前の食事で多めに作った、1 週間以内の品は残り物にできる", () => {
+    expect(whyNotLeftover(source, { date: day("2026-10-09"), mealTime: "lunch" })).toBeNull();
+    expect(whyNotLeftover(source, { date: day("2026-10-15"), mealTime: "dinner" })).toBeNull();
+  });
+
+  it("できない理由を返す", () => {
+    expect(whyNotLeftover(source, { date: day("2026-10-08"), mealTime: "dinner" })).toContain("より前に作った品だけ");
+    expect(whyNotLeftover({ ...source, servingsToCook: 2 }, { date: day("2026-10-09"), mealTime: "dinner" })).toContain(
+      "多めに作った品だけ",
+    );
+    expect(whyNotLeftover(source, { date: day("2026-10-16"), mealTime: "dinner" })).toContain("7日前までに作った品だけ");
   });
 });

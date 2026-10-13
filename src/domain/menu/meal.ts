@@ -40,9 +40,32 @@ export type MenuEvent =
   | { type: "EatingOutMarked"; mealId: MealId }
   | { type: "EatingOutCancelled"; mealId: MealId };
 
-function isBefore(a: { date: CalendarDate; mealTime: MealTime }, b: { date: CalendarDate; mealTime: MealTime }) {
+type MealSlot = { readonly date: CalendarDate; readonly mealTime: MealTime };
+
+function isBefore(a: MealSlot, b: MealSlot) {
   const byDate = compareDates(a.date, b.date);
   return byDate < 0 || (byDate === 0 && MEAL_TIMES.indexOf(a.mealTime) < MEAL_TIMES.indexOf(b.mealTime));
+}
+
+/** 多めに作った（いつもの人数より多く作った）品か */
+export function isCookedExtra(servingsToCook: number): boolean {
+  return servingsToCook > HOUSEHOLD_SERVINGS;
+}
+
+/**
+ * M6・M12: 品を、その食事の残り物にできない理由。できるなら null。
+ * 残り物を入れるとき（Meal.addLeftover）と、画面に候補を出すときの両方がこの判定を使う。
+ */
+export function whyNotLeftover(
+  source: MealSlot & { readonly servingsToCook: number },
+  target: MealSlot,
+): string | null {
+  if (!isBefore(source, target)) return "残り物にできるのは、この食事より前に作った品だけです";
+  if (!isCookedExtra(source.servingsToCook)) return "残り物にできるのは、多めに作った品だけです";
+  if (compareDates(source.date, addDays(target.date, -LEFTOVER_KEEP_DAYS)) < 0) {
+    return `残り物にできるのは、${LEFTOVER_KEEP_DAYS}日前までに作った品だけです`;
+  }
+  return null;
 }
 
 /**
@@ -145,18 +168,11 @@ export class Meal {
     this.events.push({ type: "EatingOutCancelled", mealId: this.id });
   }
 
-  /** M6: 残り物は、それより前の食事で多めに作った（2 人より多い）品だけ。M12: 1 週間前まで */
+  /** M6: 残り物は、それより前の食事で多めに作った品だけ。M12: 1 週間前まで */
   addLeftover(source: DishInMeal) {
     this.assertNotEatingOut();
-    if (!isBefore(source, this)) {
-      throw new DomainError("残り物にできるのは、この食事より前に作った品だけです");
-    }
-    if (source.servingsToCook <= HOUSEHOLD_SERVINGS) {
-      throw new DomainError("残り物にできるのは、多めに作った品だけです");
-    }
-    if (compareDates(source.date, addDays(this.date, -LEFTOVER_KEEP_DAYS)) < 0) {
-      throw new DomainError(`残り物にできるのは、${LEFTOVER_KEEP_DAYS}日前までに作った品だけです`);
-    }
+    const reason = whyNotLeftover(source, this);
+    if (reason) throw new DomainError(reason);
     if (this._leftovers.some((l) => l.sourceDishId === source.id)) return;
     this._leftovers.push({ sourceDishId: source.id, recipeId: source.recipeId });
     this.events.push({ type: "LeftoverAdded", sourceDishId: source.id });

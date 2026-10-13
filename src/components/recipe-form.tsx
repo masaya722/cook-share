@@ -8,7 +8,7 @@ import { formatShort, today } from "@/lib/date";
 import { normalizeIngredientRows } from "@/infrastructure/recipe-mapper";
 import { invalidateMeals } from "@/lib/meals";
 import { createClient } from "@/lib/supabase/client";
-import type { Ingredient, RecipeDraft } from "@/lib/types";
+import type { IngredientRow, RecipeDraft } from "@/lib/types";
 import { ServingsStepper } from "./servings-stepper";
 import { Spinner, buttonClass, inputClass, subtleButtonClass } from "./ui";
 
@@ -44,7 +44,7 @@ export function RecipeForm({ initial, recipeId }: { initial: RecipeDraft; recipe
   const set = <K extends keyof RecipeDraft>(key: K, value: RecipeDraft[K]) =>
     setDraft((d) => ({ ...d, [key]: value }));
 
-  const setIngredient = (i: number, patch: Partial<Ingredient>) =>
+  const setIngredient = (i: number, patch: Partial<IngredientRow>) =>
     set(
       "ingredients",
       draft.ingredients.map((ing, j) => (j === i ? { ...ing, ...patch } : ing)),

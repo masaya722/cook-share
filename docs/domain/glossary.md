@@ -59,3 +59,4 @@
 | メニュー | 「献立」と混ざるため使わない |
 | 主菜・副菜・汁物 | 献立の中で区別しないことにしたため、モデルには持たない |
 | meal_plans | 第 3 段階で `meals`・`dishes`・`leftovers` に置き換えて廃止した（0004 で削除済み） |
+| Recipe / Ingredient（DB の行の意味で） | コードでは DB の行の形を `RecipeRow`・`IngredientRow` と呼び、ドメインの `Recipe`・`Ingredient` と区別する |

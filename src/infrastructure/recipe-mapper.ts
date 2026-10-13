@@ -1,7 +1,7 @@
 import { Ingredient } from "@/domain/recipe/ingredient";
 import { Recipe } from "@/domain/recipe/recipe";
 import { Servings } from "@/domain/recipe/servings";
-import type { Ingredient as IngredientRow, Recipe as RecipeRow } from "@/lib/types";
+import type { IngredientRow, RecipeRow } from "@/lib/types";
 
 /** 古い形式（第 4 段階より前は文字列「2人分」）も読めるようにする */
 function toServings(value: number | string | null): Servings {

@@ -4,7 +4,7 @@ import { type DishId, type DishInMeal, Meal, type MealTime } from "@/domain/menu
 import type { RecipeId } from "@/domain/recipe/recipe";
 import type { CalendarDate } from "@/domain/shared/calendar-date";
 import { ShoppingList } from "@/domain/shopping/shopping-list";
-import type { Recipe as RecipeRow } from "@/lib/types";
+import type { RecipeRow } from "@/lib/types";
 import { toDomainRecipe } from "./recipe-mapper";
 import { type ShoppingItemRow, toShoppingItem, toShoppingItemRow } from "./shopping-item-mapper";
 

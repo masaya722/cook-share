@@ -1,8 +1,12 @@
 /**
+ * DB の行の形。ドメインの Recipe・Ingredient（src/domain/recipe/）とは別物なので、名前に Row を付けて区別する。
+ */
+
+/**
  * 材料（DB の recipes.ingredients の 1 要素）。name は食材（店で買う物としての名前）。
  * 第 4 段階より前のデータには preparation が無く、name に下ごしらえが混ざっていることがある。
  */
-export type Ingredient = {
+export type IngredientRow = {
   name: string;
   amount: string;
   preparation?: string;
@@ -10,7 +14,7 @@ export type Ingredient = {
 
 export type SourceType = "youtube" | "web" | "manual";
 
-export type Recipe = {
+export type RecipeRow = {
   id: string;
   title: string;
   source_url: string | null;
@@ -20,7 +24,7 @@ export type Recipe = {
   servings: number | null;
   cook_time: string | null;
   description: string | null;
-  ingredients: Ingredient[];
+  ingredients: IngredientRow[];
   steps: string[];
   tags: string[];
   memo: string | null;
@@ -29,11 +33,11 @@ export type Recipe = {
 };
 
 export type RecipeSummary = Pick<
-  Recipe,
+  RecipeRow,
   "id" | "title" | "image_url" | "tags" | "source_type" | "cook_time" | "ingredients"
 >;
 
-export type RecipeDraft = Omit<Recipe, "id" | "created_at" | "updated_at">;
+export type RecipeDraft = Omit<RecipeRow, "id" | "created_at" | "updated_at">;
 
 export function emptyDraft(): RecipeDraft {
   return {

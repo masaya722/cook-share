@@ -3,7 +3,7 @@ import { RecipeForm } from "@/components/recipe-form";
 import { PageHeader } from "@/components/ui";
 import { Servings } from "@/domain/recipe/servings";
 import { createClient } from "@/lib/supabase/server";
-import type { Recipe, RecipeDraft } from "@/lib/types";
+import type { RecipeDraft, RecipeRow } from "@/lib/types";
 
 export default async function EditRecipePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -11,7 +11,7 @@ export default async function EditRecipePage({ params }: { params: Promise<{ id:
   const { data } = await supabase.from("recipes").select("*").eq("id", id).maybeSingle();
   if (!data) notFound();
 
-  const recipe = data as Recipe;
+  const recipe = data as RecipeRow;
   const draft: RecipeDraft = {
     title: recipe.title,
     source_url: recipe.source_url,

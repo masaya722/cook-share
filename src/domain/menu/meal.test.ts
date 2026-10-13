@@ -94,6 +94,13 @@ describe("残り物", () => {
     expect(() => dayBefore.addLeftover(curryCookedFor(4))).toThrow("より前に作った品だけ");
   });
 
+  it("1 週間前に作った品までは残り物にでき、それより前は不可", () => {
+    const weekLater = Meal.plan("m2", day("2026-10-15"), "dinner");
+    expect(() => weekLater.addLeftover(curryCookedFor(4))).not.toThrow();
+    const eightDaysLater = Meal.plan("m3", day("2026-10-16"), "dinner");
+    expect(() => eightDaysLater.addLeftover(curryCookedFor(4))).toThrow("7日前までに作った品だけ");
+  });
+
   it("外食にすると残り物も外れる", () => {
     const next = Meal.plan("m2", day("2026-10-09"), "dinner");
     next.addLeftover(curryCookedFor(4));

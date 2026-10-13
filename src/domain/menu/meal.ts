@@ -1,6 +1,6 @@
 import type { RecipeId } from "../recipe/recipe";
 import { HOUSEHOLD_SERVINGS } from "../recipe/servings";
-import { type CalendarDate, compareDates } from "../shared/calendar-date";
+import { addDays, type CalendarDate, compareDates } from "../shared/calendar-date";
 import { DomainError } from "../shared/domain-error";
 
 export type MealId = string & { readonly __brand: "MealId" };
@@ -10,6 +10,9 @@ export type DishId = string & { readonly __brand: "DishId" };
 export type MealTime = "breakfast" | "lunch" | "dinner";
 export const MEAL_TIMES: readonly MealTime[] = ["breakfast", "lunch", "dinner"];
 export const MEAL_TIME_LABELS: Record<MealTime, string> = { breakfast: "朝", lunch: "昼", dinner: "夜" };
+
+/** M12: 残り物にできるのは、何日前までに作った品か（作り置きなどで 1 週間は食べることがある） */
+export const LEFTOVER_KEEP_DAYS = 7;
 
 /** 品: 献立に並ぶ 1 つの料理。必ずレシピを参照する */
 export type Dish = {
@@ -142,7 +145,7 @@ export class Meal {
     this.events.push({ type: "EatingOutCancelled", mealId: this.id });
   }
 
-  /** M6: 残り物は、それより前の食事で多めに作った（2 人より多い）品だけ */
+  /** M6: 残り物は、それより前の食事で多めに作った（2 人より多い）品だけ。M12: 1 週間前まで */
   addLeftover(source: DishInMeal) {
     this.assertNotEatingOut();
     if (!isBefore(source, this)) {
@@ -150,6 +153,9 @@ export class Meal {
     }
     if (source.servingsToCook <= HOUSEHOLD_SERVINGS) {
       throw new DomainError("残り物にできるのは、多めに作った品だけです");
+    }
+    if (compareDates(source.date, addDays(this.date, -LEFTOVER_KEEP_DAYS)) < 0) {
+      throw new DomainError(`残り物にできるのは、${LEFTOVER_KEEP_DAYS}日前までに作った品だけです`);
     }
     if (this._leftovers.some((l) => l.sourceDishId === source.id)) return;
     this._leftovers.push({ sourceDishId: source.id, recipeId: source.recipeId });

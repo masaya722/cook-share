@@ -1,4 +1,4 @@
-import { MEAL_TIMES, type MealTime } from "@/domain/menu/meal";
+import { LEFTOVER_KEEP_DAYS, MEAL_TIMES, type MealTime } from "@/domain/menu/meal";
 import { addDays, type CalendarDate, compareDates } from "@/domain/shared/calendar-date";
 import { createClient } from "./supabase/client";
 
@@ -78,13 +78,13 @@ export async function fetchMeals(from: CalendarDate, to: CalendarDate): Promise<
   return meals;
 }
 
-/** この食事より前の数日間に、多めに（2 人より多く）作った品 */
+/** この食事より前の 1 週間に、多めに（2 人より多く）作った品 */
 export async function fetchLeftoverCandidates(date: CalendarDate, mealTime: MealTime): Promise<LeftoverCandidate[]> {
   const { data, error } = await createClient()
     .from("dishes")
     .select("id, servings_to_cook, recipe:recipes(id, title, image_url), meal:meals!dishes_meal_id_fkey!inner(date, meal_time)")
     .gt("servings_to_cook", 2)
-    .gte("meal.date", addDays(date, -3))
+    .gte("meal.date", addDays(date, -LEFTOVER_KEEP_DAYS))
     .lte("meal.date", date);
   if (error) throw error;
   const rows = data as unknown as {

@@ -177,7 +177,7 @@ function LeftoverList({
       {!failed && candidates === null && <ListSkeleton />}
       {candidates?.length === 0 && (
         <li className="py-6 text-center text-sm text-muted">
-          ここ数日で多めに作った品はありません
+          この1週間で多めに作った品はありません
           <br />
           作る人数を 3 人以上にした品が、ここに出ます
         </li>

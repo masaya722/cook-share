@@ -8,6 +8,7 @@ import type { ShoppingList } from "./shopping-list";
  * - 品が献立から外れた（取りやめ・外食・レシピ削除） → まだ買っていない物を消す
  * - 作る人数が変わった → まだリストにある物の分量を合わせる
  * 残り物は買い物を発生させない（M8）ので反応しない。
+ * どの出来事に反応するかは switch で網羅し、献立の出来事が増えたらコンパイルエラーで気づけるようにしている。
  */
 export function applyMenuEvents(
   list: ShoppingList,
@@ -32,6 +33,18 @@ export function applyMenuEvents(
       case "DishServingsChanged":
         list.rescaleDish(event.dishId, event.from, event.to);
         break;
+      // M8: 残り物は買い物を発生させない
+      case "LeftoverAdded":
+      case "LeftoverRemoved":
+      // 外食になったときに外れた品は、それぞれ DishRemoved として届く
+      case "EatingOutMarked":
+      case "EatingOutCancelled":
+        break;
+      default: {
+        // 献立の出来事を新しく足したら、買い物リストに反応するかをここで決めるまでコンパイルを通さない
+        const unhandled: never = event;
+        throw new Error(`買い物リストのポリシーで扱っていない献立の出来事です: ${JSON.stringify(unhandled)}`);
+      }
     }
   }
 }

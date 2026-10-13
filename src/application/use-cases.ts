@@ -176,11 +176,17 @@ async function backfill(store: Store, list: ShoppingList, dishes: DishInMeal[]) 
 
 /**
  * メモ帳のように書き足す。1 行が 1 つの買う物（「牛乳 2本」は品名と分量に分ける）。
- * 何行もまとめて書けば、空行や絵文字だけの見出しが区切りになる。
+ * 何行もまとめて書けば、空行や絵文字だけの見出しが区切りになる。afterId の行のすぐ下に入れる（なければ末尾）。
  */
-export async function writeShopping(store: Store, text: string): Promise<ShoppingEntry[]> {
+export async function writeShopping(
+  store: Store,
+  text: string,
+  options: { afterId?: string | null; newIds?: readonly string[] } = {},
+): Promise<ShoppingEntry[]> {
   const list = await store.loadShoppingList();
-  const added = list.write(text);
+  // 相手がもう消した行の下に書こうとしたときは、末尾に入れる
+  const afterId = options.afterId && existing(list.all(), [options.afterId]).length > 0 ? options.afterId : null;
+  const added = list.write(text, { afterId: afterId as ShoppingItemId | null, newIds: options.newIds });
   if (added.length === 0) throw new DomainError("品名を入力してください");
   await store.save({ shopping: list.pullChanges() });
   return added;

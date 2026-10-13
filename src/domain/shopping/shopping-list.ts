@@ -157,15 +157,40 @@ export class ShoppingList {
 
   /**
    * メモ帳のように書き足す。1 行が 1 つの買う物で、「牛乳 2本」は品名と分量に分ける。
-   * 何行もまとめて書いた（貼り付けた）ときは、空行や絵文字だけの見出しを区切りにする。末尾に足していく。
+   * 何行もまとめて書いた（貼り付けた）ときは、空行や絵文字だけの見出しを区切りにする。
+   * afterId を指定するとその行のすぐ下に、指定しなければ末尾に入れる。
+   * newIds を渡すと、その順に新しい物の id に使う（画面とサーバーで同じ結果にするため）。
    */
-  write(text: string): ShoppingEntry[] {
+  write(text: string, options: { afterId?: ShoppingItemId | null; newIds?: readonly string[] } = {}): ShoppingEntry[] {
+    const ids = [...(options.newIds ?? [])];
+    const nextId = () => (ids.shift() ?? this.newId()) as ShoppingItemId;
     const added: ShoppingEntry[] = [];
     for (const line of parseLines(text)) {
-      if (line.kind === "divider") added.push(this.addDivider());
-      else added.push(this.addManual({ name: line.name, quantity: line.quantity }));
+      const id = nextId();
+      if (line.kind === "divider") {
+        added.push(this.putNew({ kind: "divider", id, position: this.nextPosition() }));
+      } else {
+        added.push(
+          this.putNew({
+            kind: "item",
+            id,
+            name: ItemName.of(line.name),
+            quantity: Quantity.parse(line.quantity),
+            origin: { kind: "manual" },
+            neededOn: null,
+            boughtOn: null,
+            position: this.nextPosition(),
+          }),
+        );
+      }
     }
-    return added;
+    if (added.length > 0 && options.afterId && this.entries.has(options.afterId)) {
+      const newIds = new Set<ShoppingItemId>(added.map((e) => e.id));
+      const rest = this.orderable().filter((e) => !newIds.has(e.id));
+      const next = rest[rest.findIndex((e) => e.id === options.afterId) + 1] ?? null;
+      this.moveBefore([...newIds], next ? next.id : null);
+    }
+    return added.map((e) => this.entries.get(e.id)!);
   }
 
   /** 区切りを末尾に足す */
@@ -293,6 +318,12 @@ export class ShoppingList {
   private getItem(id: ShoppingItemId): ShoppingItem {
     const entry = this.entries.get(id);
     if (!entry || entry.kind !== "item") throw new DomainError("この買う物はリストにありません");
+    return entry;
+  }
+
+  private putNew<T extends ShoppingEntry>(entry: T): T {
+    if (this.entries.has(entry.id)) throw new DomainError("同じ id の買う物がすでにあります");
+    this.put(entry);
     return entry;
   }
 

@@ -5,7 +5,7 @@ import { Recipe, type RecipeId } from "../recipe/recipe";
 import { Servings } from "../recipe/servings";
 import { calendarDate } from "../shared/calendar-date";
 import { applyMenuEvents } from "./menu-policy";
-import { type ShoppingItemId, ShoppingList, type ShoppingRow } from "./shopping-list";
+import { type ShoppingEntry, type ShoppingItemId, ShoppingList, type ShoppingRow } from "./shopping-list";
 import { parseLine, parseLines } from "./shopping-line";
 
 const day = (d: string) => calendarDate(d);
@@ -283,6 +283,34 @@ describe("メモ帳のように書く", () => {
     list.write("玉ねぎ");
     planDish(list, "2026-10-08", "curry", "d1");
     expect(row(list, "玉ねぎ")).toMatchObject({ quantityText: "1個", recipeTitles: ["カレー"], editable: false });
+  });
+});
+
+describe("好きな行の下に書く", () => {
+  it("指定した行のすぐ下に入る。何行書いても順番どおり", () => {
+    const list = newList();
+    const [beef, , brush] = list.write("牛肉\n卵\n靴ブラシ");
+    list.write("鶏もも肉\n豚こま 300g", { afterId: beef.id });
+    expect(todoLines(list)).toEqual(["牛肉", "鶏もも肉", "豚こま", "卵", "靴ブラシ"]);
+    list.write("筆箱", { afterId: brush.id });
+    expect(todoLines(list).at(-1)).toBe("筆箱");
+  });
+
+  it("渡した id をその順に使う（画面とサーバーで同じ結果になる）", () => {
+    const list = newList();
+    const added = list.write("牛乳\n\n靴洗剤", { newIds: ["a", "b", "c"] });
+    expect(added.map((e) => e.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("同じ操作をすれば、別の場所でも同じ並び順になる", () => {
+    const seed = newList();
+    const [first] = seed.write("牛肉\n卵");
+    const entries = seed.all() as ShoppingEntry[];
+    const a = ShoppingList.reconstitute([...entries]);
+    const b = ShoppingList.reconstitute([...entries]);
+    a.write("鶏もも肉", { afterId: first.id, newIds: ["x"] });
+    b.write("鶏もも肉", { afterId: first.id, newIds: ["x"] });
+    expect(a.all()).toEqual(b.all());
   });
 });
 

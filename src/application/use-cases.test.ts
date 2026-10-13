@@ -214,6 +214,14 @@ describe("メモ帳のように書く", () => {
     expect([...store.items.values()].map((e) => e.kind)).toEqual(["item", "divider", "item"]);
   });
 
+  it("指定した行のすぐ下に入る。その行がもう消えていたら末尾に入る", async () => {
+    const [beef] = await writeShopping(store, "牛肉\n卵");
+    await writeShopping(store, "鶏もも肉", { afterId: beef.id });
+    await writeShopping(store, "筆箱", { afterId: "gone" });
+    const list = await store.loadShoppingList();
+    expect(list.items().map((i) => i.name.text)).toEqual(["牛肉", "鶏もも肉", "卵", "筆箱"]);
+  });
+
   it("何も書いていなければ足さない", async () => {
     await expect(writeShopping(store, "  \n ")).rejects.toThrow("品名を入力してください");
   });

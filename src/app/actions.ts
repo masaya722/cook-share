@@ -100,9 +100,22 @@ export async function openShoppingListAction(today: string): Promise<ActionResul
   return run(async (store) => (await useCases.openShoppingList(store, calendarDate(today))).map(toShoppingItemRow));
 }
 
-/** メモ帳のように書き足す（1 行でも、何行まとめてでも） */
-export async function writeShoppingAction(text: string): Promise<ActionResult<ShoppingItemRow[]>> {
-  return run(async (store) => (await useCases.writeShopping(store, text)).map(toShoppingItemRow));
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * メモ帳のように書き足す（1 行でも、何行まとめてでも）。afterId の行のすぐ下に入れる。
+ * 画面が先に同じ操作をして表示しているので、新しい物の id は画面が決めた newIds を使う。
+ */
+export async function writeShoppingAction(input: {
+  text: string;
+  afterId?: string | null;
+  newIds?: string[];
+}): Promise<ActionResult<ShoppingItemRow[]>> {
+  const newIds = (input.newIds ?? []).filter((id) => UUID.test(id)).slice(0, 500);
+  const afterId = input.afterId && UUID.test(input.afterId) ? input.afterId : null;
+  return run(async (store) =>
+    (await useCases.writeShopping(store, input.text, { afterId, newIds })).map(toShoppingItemRow),
+  );
 }
 
 export async function addShoppingDividerAction(): Promise<ActionResult<ShoppingItemRow>> {

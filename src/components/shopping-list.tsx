@@ -18,7 +18,7 @@ import {
   type ShoppingItemId,
   type ShoppingRow,
 } from "@/domain/shopping/shopping-list";
-import { LINE_BREAK } from "@/domain/shopping/shopping-line";
+import { LINE_BREAK, parseLines } from "@/domain/shopping/shopping-line";
 import {
   SHOPPING_ITEM_COLUMNS,
   type ShoppingItemRow,
@@ -29,7 +29,7 @@ import { formatShort } from "@/lib/date";
 import { createClient } from "@/lib/supabase/client";
 import { useToday } from "@/lib/use-today";
 import { ShoppingRowsSkeleton, ShoppingSkeleton } from "./skeletons";
-import { Spinner, buttonClass, inputClass, subtleButtonClass } from "./ui";
+import { subtleButtonClass } from "./ui";
 
 // タブを行き来したときに前回の内容をすぐ出すための、端末内だけのキャッシュ
 let cache: ShoppingItemRow[] | null = null;
@@ -44,10 +44,11 @@ const FILTERS: { label: string; withinDays?: number }[] = [
 const SAVE_FAILED = "保存できませんでした。通信状況を確認してください";
 
 type Result = { ok: true } | { ok: false; error: string };
+type Entry = ShoppingRow | DividerRow;
 
 /**
  * 画面側でもドメインの買い物リストを動かして、結果をすぐ画面に出す（保存はサーバーで同じ操作をする）。
- * 同じ入力からは同じ結果になるので、並べ替えなども保存の完了を待たずに反映できる。
+ * 同じ入力からは同じ結果になるので、書き足し・並べ替えなども保存の完了を待たずに反映できる。
  */
 function applyLocally(rows: ShoppingItemRow[], change: (list: ShoppingListModel) => void): ShoppingItemRow[] {
   const list = ShoppingListModel.reconstitute(rows.map(toShoppingEntry));
@@ -61,6 +62,11 @@ function applyLocally(rows: ShoppingItemRow[], change: (list: ShoppingListModel)
   ];
 }
 
+const idsOf = (e: Entry): ShoppingItemId[] => (e.kind === "row" ? [...e.itemIds] : [e.id]);
+const anchorOf = (e: Entry): ShoppingItemId => (e.kind === "row" ? e.anchorId : e.id);
+/** その id を含む行か区切りか */
+const contains = (e: Entry, id: ShoppingItemId) => (e.kind === "row" ? e.itemIds.includes(id) : e.id === id);
+
 export function ShoppingList() {
   // 「今日」は端末の日付で決めるので、サーバーでは描画しない
   const today = useToday() as CalendarDate | null;
@@ -72,6 +78,9 @@ function ShoppingListBody({ today }: { today: CalendarDate }) {
   const [withinDays, setWithinDays] = useState<number | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  // 書き足す行をどの行の下に出すか（null なら末尾）
+  const [draftAfter, setDraftAfter] = useState<ShoppingItemId | null>(null);
+  const draftRef = useRef<HTMLTextAreaElement>(null);
   // 保存の完了を待たずに続けて操作しても、最新の一覧をもとに変更できるようにする
   const itemsRef = useRef(items);
 
@@ -134,13 +143,7 @@ function ShoppingListBody({ today }: { today: CalendarDate }) {
   }, []);
 
   const view = useMemo(
-    () =>
-      items
-        ? ShoppingListModel.reconstitute(items.map(toShoppingEntry)).view({
-            today,
-            withinDays,
-          })
-        : null,
+    () => (items ? ShoppingListModel.reconstitute(items.map(toShoppingEntry)).view({ today, withinDays }) : null),
     [items, today, withinDays],
   );
 
@@ -152,13 +155,37 @@ function ShoppingListBody({ today }: { today: CalendarDate }) {
       update(applyLocally(before, local));
     } catch (e) {
       setError(e instanceof Error ? e.message : SAVE_FAILED);
-      return;
+      return false;
     }
     const result = await save().catch((): Result => ({ ok: false, error: SAVE_FAILED }));
     if (!result.ok) {
       update(before);
       setError(result.error);
     }
+    return result.ok;
+  }
+
+  /**
+   * draftAfter の行の下に書き足す。新しい物の id は画面で決めてサーバーにも渡す（同じ結果になる）。
+   * 書き足した後は、書き足す行が今書いた物のすぐ下に移る（Enter で続けて書ける）。
+   */
+  function write(text: string, afterId: ShoppingItemId | null) {
+    const count = parseLines(text).length;
+    if (count === 0) return;
+    const newIds = Array.from({ length: count }, () => crypto.randomUUID());
+    setDraftAfter(newIds.at(-1)! as ShoppingItemId);
+    void change(
+      (list) => {
+        list.write(text, { afterId, newIds });
+      },
+      () => writeShoppingAction({ text, afterId, newIds }),
+    );
+  }
+
+  /** 書き足す行をこの行の下に出して、キーボードを閉じずにそこへ移る */
+  function openDraftAfter(id: ShoppingItemId) {
+    setDraftAfter(id);
+    draftRef.current?.focus();
   }
 
   function toggle(row: ShoppingRow) {
@@ -176,7 +203,9 @@ function ShoppingListBody({ today }: { today: CalendarDate }) {
     );
   }
 
+  /** 1 行の文章として直す。全部消したら、メモ帳で行を消したのと同じくリストから消す */
   function edit(row: ShoppingRow, text: string) {
+    if (!text.trim()) return remove(row.itemIds);
     if (text.trim() === row.editText) return;
     const id = row.itemIds[0];
     void change(
@@ -214,12 +243,7 @@ function ShoppingListBody({ today }: { today: CalendarDate }) {
 
   return (
     <>
-      <QuickWrite
-        onWritten={(rows) => update([...(itemsRef.current ?? []), ...rows])}
-        onError={setError}
-      />
-
-      <div className="-mx-4 mt-4 flex gap-2 overflow-x-auto px-4 pb-1">
+      <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
         {FILTERS.map((f) => (
           <button
             key={f.label}
@@ -237,15 +261,9 @@ function ShoppingListBody({ today }: { today: CalendarDate }) {
 
       {view === null && error ? null : view === null ? (
         <ShoppingRowsSkeleton />
-      ) : view.todo.length === 0 && view.bought.length === 0 ? (
-        <p className="mt-10 text-center text-sm text-muted">
-          買う物はありません
-          <br />
-          思いついた物を上に書くか、献立を決めると材料が入ります
-        </p>
       ) : (
         <>
-          <div className="mt-5 mb-2 flex items-center justify-between">
+          <div className="mt-4 mb-2 flex items-center justify-between">
             <h2 className="text-lg font-bold">
               買う物 <span className="text-sm font-normal text-muted">{todoCount}品</span>
             </h2>
@@ -259,23 +277,25 @@ function ShoppingListBody({ today }: { today: CalendarDate }) {
             </div>
           </div>
           <p className="mb-2 text-xs text-muted">
-            {reorderable
-              ? "右の ≡ を押したまま上下に動かすと並べ替えられます。区切りで振り分けも"
-              : "並べ替えは「すべて」のときにできます"}
+            行をタップして直し、Enter ですぐ下に書き足せます。
+            {reorderable ? "右の ≡ を押したまま動かすと並べ替え" : "並べ替えは「すべて」のときにできます"}
           </p>
 
-          {view.todo.length > 0 ? (
-            <EntryList
-              entries={view.todo}
-              today={today}
-              reorderable={reorderable}
-              onToggle={toggle}
-              onRemove={remove}
-              onEdit={edit}
-              onMove={move}
-            />
-          ) : (
-            <p className="py-4 text-center text-sm text-muted">全部買いました</p>
+          <EntryList
+            entries={view.todo}
+            today={today}
+            reorderable={reorderable}
+            draft={{ afterId: draftAfter, onWrite: write, onReset: () => setDraftAfter(null) }}
+            draftInputRef={draftRef}
+            onToggle={toggle}
+            onRemove={remove}
+            onEdit={edit}
+            onOpenDraftAfter={openDraftAfter}
+            onWriteAfter={write}
+            onMove={move}
+          />
+          {todoCount === 0 && view.bought.length > 0 && (
+            <p className="py-3 text-center text-sm text-muted">全部買いました</p>
           )}
 
           {view.bought.length > 0 && (
@@ -288,6 +308,8 @@ function ShoppingListBody({ today }: { today: CalendarDate }) {
                 onToggle={toggle}
                 onRemove={remove}
                 onEdit={edit}
+                onOpenDraftAfter={openDraftAfter}
+                onWriteAfter={write}
                 onMove={move}
               />
             </>
@@ -306,25 +328,36 @@ function neededOnLabel(neededOn: CalendarDate | null, today: CalendarDate): stri
   return `${formatShort(neededOn)}に使う`;
 }
 
-const idsOf = (e: ShoppingRow | DividerRow): ShoppingItemId[] => (e.kind === "row" ? [...e.itemIds] : [e.id]);
-const anchorOf = (e: ShoppingRow | DividerRow): ShoppingItemId => (e.kind === "row" ? e.anchorId : e.id);
+type DraftProps = {
+  afterId: ShoppingItemId | null;
+  onWrite: (text: string, afterId: ShoppingItemId | null) => void;
+  onReset: () => void;
+};
 
-/** 買う物と区切りの一覧。reorderable なら ≡ を押したまま上下に動かせる */
+/** 買う物と区切りの一覧。reorderable なら ≡ を押したまま上下に動かせる。draft があれば書き足す行を出す */
 function EntryList({
   entries,
   today,
   reorderable,
+  draft,
+  draftInputRef,
   onToggle,
   onRemove,
   onEdit,
+  onOpenDraftAfter,
+  onWriteAfter,
   onMove,
 }: {
-  entries: readonly (ShoppingRow | DividerRow)[];
+  entries: readonly Entry[];
   today: CalendarDate;
   reorderable: boolean;
+  draft?: DraftProps;
+  draftInputRef?: React.Ref<HTMLTextAreaElement>;
   onToggle: (row: ShoppingRow) => void;
   onRemove: (ids: readonly ShoppingItemId[]) => void;
   onEdit: (row: ShoppingRow, text: string) => void;
+  onOpenDraftAfter: (id: ShoppingItemId) => void;
+  onWriteAfter: (text: string, afterId: ShoppingItemId | null) => void;
   onMove: (ids: readonly ShoppingItemId[], beforeId: ShoppingItemId | null) => void;
 }) {
   const refs = useRef(new Map<string, HTMLLIElement>());
@@ -361,12 +394,34 @@ function EntryList({
     if (!unchanged) onMove(idsOf(moving), before ? anchorOf(before) : null);
   }
 
+  // 書き足す行を差し込む場所（見えている行になければ末尾）
+  const draftIndex = draft?.afterId ? entries.findIndex((e) => contains(e, draft.afterId!)) : -1;
+  const items: ({ kind: "entry"; entry: Entry } | { kind: "draft" })[] = entries.map((entry) => ({
+    kind: "entry",
+    entry,
+  }));
+  if (draft) items.splice(draftIndex >= 0 ? draftIndex + 1 : items.length, 0, { kind: "draft" });
+
   return (
     <ul className="rounded-2xl border border-border bg-surface">
-      {entries.map((entry, i) => {
+      {items.map((item, i) => {
+        const border = i > 0 ? "border-t" : "";
+        if (item.kind === "draft") {
+          // 同じ key のまま場所だけ動かすので、入力欄が作り直されず、キーボードも閉じない
+          return (
+            <li key="draft" className={`flex items-center border-border ${border}`}>
+              <DraftRow
+                draft={draft!}
+                inputRef={draftInputRef}
+                afterId={draftIndex >= 0 ? anchorOfDraftTarget(entries, draft!.afterId!) : null}
+              />
+            </li>
+          );
+        }
+        const entry = item.entry;
         const dragging = drag?.key === entry.key;
         const dropHere = drag && !dragging && drag.beforeKey === entry.key;
-        const dropAtEnd = drag && drag.beforeKey === null && i === entries.length - 1;
+        const dropAtEnd = drag && drag.beforeKey === null && entry === entries.at(-1);
         return (
           <li
             key={entry.key}
@@ -375,14 +430,14 @@ function EntryList({
               else refs.current.delete(entry.key);
             }}
             style={dragging ? { transform: `translateY(${drag.dy}px)` } : undefined}
-            className={`relative flex items-center border-border ${i > 0 ? "border-t" : ""} ${
+            className={`relative flex items-center border-border ${border} ${
               dragging ? "z-10 rounded-xl bg-surface shadow-lg" : ""
             } ${dropHere ? "before:absolute before:inset-x-3 before:-top-px before:h-0.5 before:bg-accent" : ""} ${
               dropAtEnd ? "after:absolute after:inset-x-3 after:-bottom-px after:h-0.5 after:bg-accent" : ""
             }`}
           >
             {entry.kind === "divider" ? (
-              <div className="flex min-h-9 flex-1 items-center px-4">
+              <div className="flex min-h-9 flex-1 items-center pl-4">
                 <div className="h-px flex-1 bg-muted/40" />
                 <button
                   onClick={() => onRemove([entry.id])}
@@ -399,6 +454,8 @@ function EntryList({
                 onToggle={onToggle}
                 onRemove={onRemove}
                 onEdit={onEdit}
+                onOpenDraftAfter={onOpenDraftAfter}
+                onWriteAfter={onWriteAfter}
               />
             )}
             {reorderable && (
@@ -420,18 +477,91 @@ function EntryList({
   );
 }
 
+/** 書き足す行の下に入れるときの目印（その行の一番上にある買う物、または区切り） */
+function anchorOfDraftTarget(entries: readonly Entry[], id: ShoppingItemId): ShoppingItemId {
+  const entry = entries.find((e) => contains(e, id));
+  return entry ? anchorOf(entry) : id;
+}
+
+/**
+ * 書き足す行。タップして書き、Enter ですぐ下に次の行が出る（キーボードは閉じない）。
+ * 何行も貼り付けたら、1 行ずつ買う物になり、空行は区切りになる。
+ * 1 行用の入力欄（input）は貼り付けた改行を消してしまうので、textarea を 1 行の見た目で使う。
+ */
+function DraftRow({
+  draft,
+  inputRef,
+  afterId,
+}: {
+  draft: DraftProps;
+  inputRef?: React.Ref<HTMLTextAreaElement>;
+  afterId: ShoppingItemId | null;
+}) {
+  const [text, setText] = useState("");
+
+  function commit(value: string) {
+    setText("");
+    if (value.trim()) draft.onWrite(value, afterId);
+  }
+
+  return (
+    <div className="flex min-w-0 flex-1 items-center">
+      <span className="flex w-12 shrink-0 justify-center text-lg text-muted">＋</span>
+      <textarea
+        ref={inputRef}
+        rows={1}
+        value={text}
+        placeholder="書き足す（例: 牛乳 2本）"
+        aria-label="買う物を書き足す"
+        className="min-w-0 flex-1 resize-none bg-transparent py-3 pr-4 leading-6 outline-none placeholder:text-muted"
+        onChange={(e) => {
+          // 貼り付けなどで改行が入ったら（Android の Enter も）、そのまま書き足す
+          if (LINE_BREAK.test(e.target.value)) commit(e.target.value);
+          else setText(e.target.value);
+        }}
+        onPaste={(e) => {
+          const pasted = e.clipboardData.getData("text");
+          if (!LINE_BREAK.test(pasted)) return;
+          e.preventDefault();
+          commit(text ? `${text}\n${pasted}` : pasted);
+        }}
+        onKeyDown={(e) => {
+          // 変換中の Enter（日本語入力の確定）では書き足さない
+          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+            e.preventDefault();
+            commit(text);
+          }
+          // 何も書いていない行で Backspace を押したら、末尾に戻す
+          if (e.key === "Backspace" && !text) draft.onReset();
+        }}
+        onBlur={() => {
+          // 書きかけのまま離れたら書き足す。何も書いていなければ末尾に戻す
+          if (text.trim()) commit(text);
+          else draft.onReset();
+        }}
+        enterKeyHint="enter"
+        autoComplete="off"
+      />
+    </div>
+  );
+}
+
 function RowContent({
   row,
   today,
   onToggle,
   onRemove,
   onEdit,
+  onOpenDraftAfter,
+  onWriteAfter,
 }: {
   row: ShoppingRow;
   today: CalendarDate;
   onToggle: (row: ShoppingRow) => void;
   onRemove: (ids: readonly ShoppingItemId[]) => void;
   onEdit: (row: ShoppingRow, text: string) => void;
+  onOpenDraftAfter: (id: ShoppingItemId) => void;
+  onWriteAfter: (text: string, afterId: ShoppingItemId | null) => void;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   const when = neededOnLabel(row.neededOn, today);
@@ -440,6 +570,13 @@ function RowContent({
   function finishEditing() {
     if (editing !== null) onEdit(row, editing);
     setEditing(null);
+  }
+
+  function onTap() {
+    if (row.bought) return;
+    // まとめた行（献立の材料が合算されている等）は直せないので、すぐ下に書き足す
+    if (row.editable) setEditing(row.editText);
+    else onOpenDraftAfter(row.anchorId);
   }
 
   return (
@@ -455,22 +592,44 @@ function RowContent({
       </label>
 
       {editing !== null ? (
-        <input
+        <textarea
           autoFocus
+          rows={1}
           value={editing}
-          onChange={(e) => setEditing(e.target.value)}
+          onChange={(e) => {
+            // 直している最中に改行が入ったら（Android の Enter など）、ここで確定してすぐ下に書き足す行へ
+            if (LINE_BREAK.test(e.target.value)) {
+              const [first, ...rest] = e.target.value.split(LINE_BREAK);
+              setEditing(first);
+              if (rest.join("").trim()) onWriteAfter(rest.join("\n"), row.anchorId);
+              else onOpenDraftAfter(row.anchorId);
+            } else {
+              setEditing(e.target.value);
+            }
+          }}
           onBlur={finishEditing}
+          onPaste={(e) => {
+            const pasted = e.clipboardData.getData("text");
+            if (!LINE_BREAK.test(pasted)) return;
+            // 何行も貼り付けたら、この行の下にまとめて書き足す
+            e.preventDefault();
+            onWriteAfter(pasted, row.anchorId);
+          }}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.nativeEvent.isComposing) e.currentTarget.blur();
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              // 書き足す行へ移ると、この欄が離れて（blur）直した内容が保存される
+              onOpenDraftAfter(row.anchorId);
+            }
             if (e.key === "Escape") setEditing(null);
           }}
-          enterKeyHint="done"
-          className={`${inputClass} my-1.5 py-1.5`}
+          enterKeyHint="enter"
+          className="my-1.5 min-w-0 flex-1 resize-none rounded-lg border border-accent bg-surface px-2 py-1.5 leading-6 outline-none"
         />
       ) : (
         <button
           type="button"
-          onClick={() => row.editable && !row.bought && setEditing(row.editText)}
+          onClick={onTap}
           className={`min-w-0 flex-1 py-3 text-left ${row.bought ? "text-muted line-through" : ""}`}
         >
           <span className="flex justify-between gap-3">
@@ -491,79 +650,5 @@ function RowContent({
         </button>
       )}
     </div>
-  );
-}
-
-/**
- * メモ帳のように書く欄。1 つ書いて Enter で次へ（キーボードは閉じない）。
- * 何行も貼り付けたら、1 行ずつ買う物になり、空行は区切りになる。
- * 1 行用の入力欄（input）は貼り付けた改行を消してしまうので、textarea を 1 行の見た目で使う。
- */
-function QuickWrite({
-  onWritten,
-  onError,
-}: {
-  onWritten: (rows: ShoppingItemRow[]) => void;
-  onError: (message: string) => void;
-}) {
-  const [text, setText] = useState("");
-  const [pending, setPending] = useState(0);
-  const input = useRef<HTMLTextAreaElement>(null);
-
-  async function write(value: string) {
-    if (!value.trim()) return;
-    setPending((n) => n + 1);
-    const result = await writeShoppingAction(value).catch(() => ({ ok: false, error: SAVE_FAILED }) as const);
-    setPending((n) => n - 1);
-    if (result.ok) onWritten(result.value);
-    else onError(result.error);
-  }
-
-  function submit(value: string) {
-    void write(value);
-    setText("");
-    input.current?.focus();
-  }
-
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        submit(text);
-      }}
-      className="flex items-end gap-2"
-    >
-      <textarea
-        ref={input}
-        rows={1}
-        className={`${inputClass} max-h-40 min-w-0 flex-1 resize-none leading-6`}
-        placeholder="思いついた物を書く（例: 牛乳 2本）"
-        value={text}
-        onChange={(e) => {
-          const value = e.target.value;
-          // 貼り付けなどで改行が入ったら（何行も書いたら）、そのまま書き足す
-          if (LINE_BREAK.test(value)) submit(value);
-          else setText(value);
-        }}
-        onPaste={(e) => {
-          const pasted = e.clipboardData.getData("text");
-          if (!LINE_BREAK.test(pasted)) return;
-          e.preventDefault();
-          submit(text ? `${text}\n${pasted}` : pasted);
-        }}
-        onKeyDown={(e) => {
-          // 変換中の Enter（日本語入力の確定）では書き足さない
-          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-            e.preventDefault();
-            submit(text);
-          }
-        }}
-        enterKeyHint="enter"
-        autoComplete="off"
-      />
-      <button type="submit" className={`${buttonClass} shrink-0`} disabled={!text.trim()} aria-label="書き足す">
-        {pending > 0 ? <Spinner /> : "＋"}
-      </button>
-    </form>
   );
 }

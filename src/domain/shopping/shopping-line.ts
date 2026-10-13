@@ -5,6 +5,9 @@ export type WrittenLine = { kind: "item"; name: string; quantity: string } | { k
 
 // 行の先頭に付けがちな箇条書きの記号（メモ帳から貼り付けたとき用）
 const BULLET = /^[\s・･\-－‐*＊•●○◦▪■□☐☑✓✔︎]+/u;
+/** 改行とみなす文字。iPhone のメモ帳などからは \n 以外（\r や行区切り U+2028）で届くことがある */
+export const LINE_BREAK = /\r\n|[\r\n\u2028\u2029\u0085]/;
+
 // 数字のない分量としてよく書かれる言葉（「塩 少々」）
 const UNCOUNTABLE = /^(少々|少量|適量|適宜|ひとつまみ|ひとつかみ|お好みで|好みで)$/;
 // 絵文字だけの行（メモ帳の 🛒 や 💊 の見出し）は区切りとして扱う
@@ -32,7 +35,7 @@ export function parseLine(raw: string): { name: string; quantity: string } | nul
  */
 export function parseLines(text: string): WrittenLine[] {
   const lines: WrittenLine[] = [];
-  for (const raw of text.split(/\r?\n/)) {
+  for (const raw of text.split(LINE_BREAK)) {
     const isDivider = !raw.replace(BULLET, "").trim() || EMOJI_ONLY.test(raw);
     if (isDivider) {
       if (lines.length > 0 && lines.at(-1)!.kind !== "divider") lines.push({ kind: "divider" });

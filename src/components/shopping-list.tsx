@@ -18,6 +18,7 @@ import {
   type ShoppingItemId,
   type ShoppingRow,
 } from "@/domain/shopping/shopping-list";
+import { LINE_BREAK } from "@/domain/shopping/shopping-line";
 import {
   SHOPPING_ITEM_COLUMNS,
   type ShoppingItemRow,
@@ -69,7 +70,6 @@ export function ShoppingList() {
 function ShoppingListBody({ today }: { today: CalendarDate }) {
   const [items, setItems] = useState<ShoppingItemRow[] | null>(cache);
   const [withinDays, setWithinDays] = useState<number | undefined>(undefined);
-  const [sorting, setSorting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   // 保存の完了を待たずに続けて操作しても、最新の一覧をもとに変更できるようにする
@@ -138,10 +138,10 @@ function ShoppingListBody({ today }: { today: CalendarDate }) {
       items
         ? ShoppingListModel.reconstitute(items.map(toShoppingEntry)).view({
             today,
-            withinDays: sorting ? undefined : withinDays,
+            withinDays,
           })
         : null,
-    [items, today, withinDays, sorting],
+    [items, today, withinDays],
   );
 
   /** 画面を先に変え、保存に失敗したら元に戻す */
@@ -209,6 +209,8 @@ function ShoppingListBody({ today }: { today: CalendarDate }) {
   }
 
   const todoCount = view?.todo.filter((e) => e.kind === "row").length ?? 0;
+  // 絞り込み中は一部の行しか見えず、並べ替えると見えない行との順番がずれるので、すべて表示のときだけ動かせる
+  const reorderable = withinDays === undefined;
 
   return (
     <>
@@ -217,31 +219,18 @@ function ShoppingListBody({ today }: { today: CalendarDate }) {
         onError={setError}
       />
 
-      <div className="mt-4 flex items-center gap-2">
-        <div className="-ml-4 flex flex-1 gap-2 overflow-x-auto pb-1 pl-4">
-          {FILTERS.map((f) => (
-            <button
-              key={f.label}
-              onClick={() => setWithinDays(f.withinDays)}
-              disabled={sorting}
-              className={`pressable shrink-0 rounded-full border px-3.5 py-1.5 text-sm disabled:opacity-40 ${
-                !sorting && withinDays === f.withinDays
-                  ? "border-accent bg-accent text-accent-foreground"
-                  : "border-border bg-surface"
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-        <button
-          onClick={() => setSorting(!sorting)}
-          className={`pressable shrink-0 rounded-full border px-3.5 py-1.5 text-sm ${
-            sorting ? "border-accent bg-accent text-accent-foreground" : "border-border bg-surface"
-          }`}
-        >
-          {sorting ? "完了" : "並べ替え"}
-        </button>
+      <div className="-mx-4 mt-4 flex gap-2 overflow-x-auto px-4 pb-1">
+        {FILTERS.map((f) => (
+          <button
+            key={f.label}
+            onClick={() => setWithinDays(f.withinDays)}
+            className={`pressable shrink-0 rounded-full border px-4 py-1.5 text-sm ${
+              withinDays === f.withinDays ? "border-accent bg-accent text-accent-foreground" : "border-border bg-surface"
+            }`}
+          >
+            {f.label}
+          </button>
+        ))}
       </div>
 
       {error && <p className="mt-3 rounded-xl bg-accent-soft px-4 py-3 text-sm">{error}</p>}
@@ -260,25 +249,26 @@ function ShoppingListBody({ today }: { today: CalendarDate }) {
             <h2 className="text-lg font-bold">
               買う物 <span className="text-sm font-normal text-muted">{todoCount}品</span>
             </h2>
-            {sorting ? (
+            <div className="flex gap-2">
               <button className={subtleButtonClass} onClick={addDivider}>
                 ＋ 区切り
               </button>
-            ) : (
               <button className={subtleButtonClass} onClick={copyAsText} disabled={todoCount === 0}>
-                {copied ? "コピーしました ✓" : "テキストでコピー"}
+                {copied ? "コピー済 ✓" : "コピー"}
               </button>
-            )}
+            </div>
           </div>
-          {sorting && (
-            <p className="mb-2 text-xs text-muted">右の ≡ を押したまま上下に動かします。区切りで振り分けられます</p>
-          )}
+          <p className="mb-2 text-xs text-muted">
+            {reorderable
+              ? "右の ≡ を押したまま上下に動かすと並べ替えられます。区切りで振り分けも"
+              : "並べ替えは「すべて」のときにできます"}
+          </p>
 
           {view.todo.length > 0 ? (
             <EntryList
               entries={view.todo}
               today={today}
-              sorting={sorting}
+              reorderable={reorderable}
               onToggle={toggle}
               onRemove={remove}
               onEdit={edit}
@@ -288,13 +278,13 @@ function ShoppingListBody({ today }: { today: CalendarDate }) {
             <p className="py-4 text-center text-sm text-muted">全部買いました</p>
           )}
 
-          {view.bought.length > 0 && !sorting && (
+          {view.bought.length > 0 && (
             <>
               <h2 className="mt-6 mb-2 text-sm font-bold text-muted">買った物（明日になると消えます）</h2>
               <EntryList
                 entries={view.bought}
                 today={today}
-                sorting={false}
+                reorderable={false}
                 onToggle={toggle}
                 onRemove={remove}
                 onEdit={edit}
@@ -319,11 +309,11 @@ function neededOnLabel(neededOn: CalendarDate | null, today: CalendarDate): stri
 const idsOf = (e: ShoppingRow | DividerRow): ShoppingItemId[] => (e.kind === "row" ? [...e.itemIds] : [e.id]);
 const anchorOf = (e: ShoppingRow | DividerRow): ShoppingItemId => (e.kind === "row" ? e.anchorId : e.id);
 
-/** 買う物と区切りの一覧。並べ替えのときは ≡ を押したまま上下に動かせる */
+/** 買う物と区切りの一覧。reorderable なら ≡ を押したまま上下に動かせる */
 function EntryList({
   entries,
   today,
-  sorting,
+  reorderable,
   onToggle,
   onRemove,
   onEdit,
@@ -331,7 +321,7 @@ function EntryList({
 }: {
   entries: readonly (ShoppingRow | DividerRow)[];
   today: CalendarDate;
-  sorting: boolean;
+  reorderable: boolean;
   onToggle: (row: ShoppingRow) => void;
   onRemove: (ids: readonly ShoppingItemId[]) => void;
   onEdit: (row: ShoppingRow, text: string) => void;
@@ -394,34 +384,31 @@ function EntryList({
             {entry.kind === "divider" ? (
               <div className="flex min-h-9 flex-1 items-center px-4">
                 <div className="h-px flex-1 bg-muted/40" />
-                {sorting && (
-                  <button
-                    onClick={() => onRemove([entry.id])}
-                    aria-label="区切りを消す"
-                    className="pressable px-3 text-muted"
-                  >
-                    ×
-                  </button>
-                )}
+                <button
+                  onClick={() => onRemove([entry.id])}
+                  aria-label="区切りを消す"
+                  className="pressable px-3 text-muted"
+                >
+                  ×
+                </button>
               </div>
             ) : (
               <RowContent
                 row={entry}
                 today={today}
-                sorting={sorting}
                 onToggle={onToggle}
                 onRemove={onRemove}
                 onEdit={onEdit}
               />
             )}
-            {sorting && (
+            {reorderable && (
               <span
                 onPointerDown={(e) => onPointerDown(e, entry.key)}
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerUp}
                 onPointerCancel={() => setDrag(null)}
                 aria-label="押したまま上下に動かす"
-                className="flex cursor-grab touch-none items-center self-stretch px-4 text-xl text-muted select-none"
+                className="-ml-2 flex cursor-grab touch-none items-center self-stretch pr-4 pl-1 text-xl text-muted/70 select-none"
               >
                 ≡
               </span>
@@ -436,14 +423,12 @@ function EntryList({
 function RowContent({
   row,
   today,
-  sorting,
   onToggle,
   onRemove,
   onEdit,
 }: {
   row: ShoppingRow;
   today: CalendarDate;
-  sorting: boolean;
   onToggle: (row: ShoppingRow) => void;
   onRemove: (ids: readonly ShoppingItemId[]) => void;
   onEdit: (row: ShoppingRow, text: string) => void;
@@ -485,7 +470,7 @@ function RowContent({
       ) : (
         <button
           type="button"
-          onClick={() => row.editable && !row.bought && !sorting && setEditing(row.editText)}
+          onClick={() => row.editable && !row.bought && setEditing(row.editText)}
           className={`min-w-0 flex-1 py-3 text-left ${row.bought ? "text-muted line-through" : ""}`}
         >
           <span className="flex justify-between gap-3">
@@ -496,11 +481,11 @@ function RowContent({
         </button>
       )}
 
-      {!sorting && editing === null && (
+      {editing === null && (
         <button
           onClick={() => onRemove(row.itemIds)}
           aria-label={`${row.name}をリストから消す`}
-          className="pressable shrink-0 px-4 py-3 text-lg text-muted"
+          className="pressable shrink-0 px-3 py-3 text-lg text-muted"
         >
           ×
         </button>
@@ -512,6 +497,7 @@ function RowContent({
 /**
  * メモ帳のように書く欄。1 つ書いて Enter で次へ（キーボードは閉じない）。
  * 何行も貼り付けたら、1 行ずつ買う物になり、空行は区切りになる。
+ * 1 行用の入力欄（input）は貼り付けた改行を消してしまうので、textarea を 1 行の見た目で使う。
  */
 function QuickWrite({
   onWritten,
@@ -522,7 +508,7 @@ function QuickWrite({
 }) {
   const [text, setText] = useState("");
   const [pending, setPending] = useState(0);
-  const input = useRef<HTMLInputElement>(null);
+  const input = useRef<HTMLTextAreaElement>(null);
 
   async function write(value: string) {
     if (!value.trim()) return;
@@ -533,29 +519,44 @@ function QuickWrite({
     else onError(result.error);
   }
 
+  function submit(value: string) {
+    void write(value);
+    setText("");
+    input.current?.focus();
+  }
+
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        void write(text);
-        setText("");
-        input.current?.focus();
+        submit(text);
       }}
-      className="flex gap-2"
+      className="flex items-end gap-2"
     >
-      <input
+      <textarea
         ref={input}
-        className={`${inputClass} min-w-0 flex-1`}
+        rows={1}
+        className={`${inputClass} max-h-40 min-w-0 flex-1 resize-none leading-6`}
         placeholder="思いついた物を書く（例: 牛乳 2本）"
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          const value = e.target.value;
+          // 貼り付けなどで改行が入ったら（何行も書いたら）、そのまま書き足す
+          if (LINE_BREAK.test(value)) submit(value);
+          else setText(value);
+        }}
         onPaste={(e) => {
           const pasted = e.clipboardData.getData("text");
-          if (!pasted.includes("\n")) return;
-          // 何行もまとめて貼り付けたら、そのまま書き足す
+          if (!LINE_BREAK.test(pasted)) return;
           e.preventDefault();
-          void write(text ? `${text}\n${pasted}` : pasted);
-          setText("");
+          submit(text ? `${text}\n${pasted}` : pasted);
+        }}
+        onKeyDown={(e) => {
+          // 変換中の Enter（日本語入力の確定）では書き足さない
+          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+            e.preventDefault();
+            submit(text);
+          }
         }}
         enterKeyHint="enter"
         autoComplete="off"

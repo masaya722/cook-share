@@ -7,7 +7,6 @@ import { calendarDate } from "@/domain/shared/calendar-date";
 import { InMemoryStore } from "./in-memory-store";
 import {
   addLeftover,
-  addShoppingItem,
   cancelEatingOut,
   changeServings,
   deleteRecipe,
@@ -20,6 +19,7 @@ import {
   removeShoppingItems,
   saveRecipe,
   upcomingUsesOfRecipe,
+  writeShopping,
 } from "./use-cases";
 
 const today = calendarDate("2026-10-08");
@@ -46,7 +46,9 @@ beforeEach(() => {
 
 async function shopping() {
   const items = await openShoppingList(store, today);
-  return Object.fromEntries(items.map((i) => [i.food.name, Quantity.format(i.quantity)]));
+  return Object.fromEntries(
+    items.flatMap((i) => (i.kind === "item" ? [[i.name.text, Quantity.format(i.quantity)]] : [])),
+  );
 }
 
 async function planCurry(date = today, servingsToCook?: number) {
@@ -151,7 +153,7 @@ describe("レシピの削除", () => {
   it("削除すると、献立からも買い物リストからも消える。手で足した物は残る", async () => {
     const dishId = await planCurry(today, 4);
     await addLeftover(store, { date: tomorrow, mealTime: "dinner", sourceDishId: dishId }, newId);
-    await addShoppingItem(store, { food: "牛乳" });
+    await writeShopping(store, "牛乳");
 
     await deleteRecipe(store, "curry");
     expect(store.meals.size).toBe(0);
@@ -176,13 +178,13 @@ describe("買い物リストを開く", () => {
   });
 
   it("前日までに買った物は消える", async () => {
-    const milk = await addShoppingItem(store, { food: "牛乳" });
+    const [milk] = await writeShopping(store, "牛乳");
     await markBought(store, [milk.id], calendarDate("2026-10-07"));
     expect(await shopping()).toEqual({});
   });
 
   it("相手がもう消した買う物にチェックしても、エラーにならない", async () => {
-    const milk = await addShoppingItem(store, { food: "牛乳" });
+    const [milk] = await writeShopping(store, "牛乳");
     await removeShoppingItems(store, [milk.id]);
     await expect(markBought(store, [milk.id], today)).resolves.toBeUndefined();
   });
@@ -202,5 +204,17 @@ describe("レシピの保存", () => {
   it("ないレシピは上書きできない", async () => {
     const r = Recipe.create({ id: "nope", title: "x", servings: Servings.assumed(), ingredients: [] });
     await expect(saveRecipe(store, r, "update")).rejects.toThrow();
+  });
+});
+
+describe("メモ帳のように書く", () => {
+  it("何行もまとめて書ける。空行は区切りになる", async () => {
+    await writeShopping(store, "牛乳 2本\n\n靴洗剤");
+    expect(await shopping()).toEqual({ 牛乳: "2本", 靴洗剤: "" });
+    expect([...store.items.values()].map((e) => e.kind)).toEqual(["item", "divider", "item"]);
+  });
+
+  it("何も書いていなければ足さない", async () => {
+    await expect(writeShopping(store, "  \n ")).rejects.toThrow("品名を入力してください");
   });
 });

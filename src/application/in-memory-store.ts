@@ -1,7 +1,7 @@
 import { type DishInMeal, Meal, type MealTime } from "@/domain/menu/meal";
 import type { Recipe } from "@/domain/recipe/recipe";
 import { type CalendarDate, compareDates } from "@/domain/shared/calendar-date";
-import { type ShoppingItem, ShoppingList } from "@/domain/shopping/shopping-list";
+import { type ShoppingEntry, ShoppingList } from "@/domain/shopping/shopping-list";
 import type { Store } from "./store";
 
 type MealSnapshot = {
@@ -17,7 +17,7 @@ type MealSnapshot = {
 export class InMemoryStore implements Store {
   recipes = new Map<string, Recipe>();
   meals = new Map<string, MealSnapshot>();
-  items = new Map<string, ShoppingItem>();
+  items = new Map<string, ShoppingEntry>();
   backfilled = false;
   private seq = 0;
 

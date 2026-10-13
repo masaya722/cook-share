@@ -100,8 +100,21 @@ export async function openShoppingListAction(today: string): Promise<ActionResul
   return run(async (store) => (await useCases.openShoppingList(store, calendarDate(today))).map(toShoppingItemRow));
 }
 
-export async function addShoppingItemAction(input: { food: string; quantity?: string }) {
-  return run(async (store) => toShoppingItemRow(await useCases.addShoppingItem(store, input)));
+/** メモ帳のように書き足す（1 行でも、何行まとめてでも） */
+export async function writeShoppingAction(text: string): Promise<ActionResult<ShoppingItemRow[]>> {
+  return run(async (store) => (await useCases.writeShopping(store, text)).map(toShoppingItemRow));
+}
+
+export async function addShoppingDividerAction(): Promise<ActionResult<ShoppingItemRow>> {
+  return run(async (store) => toShoppingItemRow(await useCases.addShoppingDivider(store)));
+}
+
+export async function editShoppingItemAction(id: string, text: string) {
+  return run((store) => useCases.editShoppingItem(store, id, text));
+}
+
+export async function moveShoppingEntriesAction(ids: string[], beforeId: string | null) {
+  return run((store) => useCases.moveShoppingEntries(store, ids, beforeId));
 }
 
 export async function markBoughtAction(ids: string[], today: string) {

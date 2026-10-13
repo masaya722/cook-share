@@ -1,4 +1,5 @@
 import { DomainError } from "../shared/domain-error";
+import { nameKey } from "../shared/name-key";
 
 /**
  * 食材: 店で買う物としての名前。
@@ -16,16 +17,7 @@ export class Food {
   static of(name: string): Food {
     const trimmed = name.trim();
     if (!trimmed) throw new DomainError("食材名を入力してください");
-    return new Food(trimmed, Food.normalize(trimmed));
-  }
-
-  private static normalize(name: string): string {
-    return name
-      .normalize("NFKC")
-      .replace(/[（]/g, "(")
-      .replace(/[）]/g, ")")
-      .replace(/\s+/g, "")
-      .toLowerCase();
+    return new Food(trimmed, nameKey(trimmed));
   }
 
   equals(other: Food): boolean {

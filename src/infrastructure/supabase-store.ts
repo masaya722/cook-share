@@ -6,7 +6,12 @@ import type { CalendarDate } from "@/domain/shared/calendar-date";
 import { ShoppingList } from "@/domain/shopping/shopping-list";
 import type { RecipeRow } from "@/lib/types";
 import { toDomainRecipe, toRecipeRow } from "./recipe-mapper";
-import { type ShoppingItemRow, toShoppingItem, toShoppingItemRow } from "./shopping-item-mapper";
+import {
+  SHOPPING_ITEM_COLUMNS,
+  type ShoppingItemRow,
+  toShoppingEntry,
+  toShoppingItemRow,
+} from "./shopping-item-mapper";
 
 // meals と dishes は「食事の品」と「残り物（leftovers 経由）」の 2 通りでつながるので、使う外部キーを明示する。
 // leftovers 側はつながり方が 1 通りなので指定しない（「!leftovers_...」は PostgREST が「!left」結合と読んでしまう）
@@ -119,10 +124,10 @@ export class SupabaseStore implements Store {
     const rows = check(
       await this.db
         .from("shopping_items")
-        .select("id, food, quantity, origin_dish_id, recipe_title, needed_on, bought_on")
-        .order("created_at"),
+        .select(SHOPPING_ITEM_COLUMNS)
+        .order("position"),
     );
-    return ShoppingList.reconstitute((rows as ShoppingItemRow[]).map(toShoppingItem));
+    return ShoppingList.reconstitute((rows as unknown as ShoppingItemRow[]).map(toShoppingEntry));
   }
 
   async isShoppingListBackfilled() {

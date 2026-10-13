@@ -5,7 +5,7 @@ import { type CalendarDate, compareDates } from "@/domain/shared/calendar-date";
 import { DomainError } from "@/domain/shared/domain-error";
 import * as menu from "@/domain/menu/menu-service";
 import { applyMenuEvents } from "@/domain/shopping/menu-policy";
-import type { ShoppingItem, ShoppingItemId, ShoppingList } from "@/domain/shopping/shopping-list";
+import type { ShoppingEntry, ShoppingItemId, ShoppingList } from "@/domain/shopping/shopping-list";
 import type { Store } from "./store";
 
 /** 新しく作るものの id。テストでは決まった値を渡せるようにする */
@@ -150,7 +150,7 @@ export async function deleteRecipe(store: Store, recipeId: string) {
  * - 初回だけ、今日以降の献立の材料を買い物リストに入れる（買い物リストを保存する前に決めた献立のため）
  * - 前日までに買った物を消す
  */
-export async function openShoppingList(store: Store, today: CalendarDate): Promise<ShoppingItem[]> {
+export async function openShoppingList(store: Store, today: CalendarDate): Promise<ShoppingEntry[]> {
   const [list, backfilled] = await Promise.all([store.loadShoppingList(), store.isShoppingListBackfilled()]);
   if (!backfilled) await backfill(store, list, await store.loadDishesFrom(today));
   list.purgeBought(today);
@@ -174,12 +174,39 @@ async function backfill(store: Store, list: ShoppingList, dishes: DishInMeal[]) 
   applyMenuEvents(list, events, await recipesFor(store, events));
 }
 
-/** 牛乳・バナナ・代わりの食材などを手で足す */
-export async function addShoppingItem(store: Store, input: { food: string; quantity?: string }) {
+/**
+ * メモ帳のように書き足す。1 行が 1 つの買う物（「牛乳 2本」は品名と分量に分ける）。
+ * 何行もまとめて書けば、空行や絵文字だけの見出しが区切りになる。
+ */
+export async function writeShopping(store: Store, text: string): Promise<ShoppingEntry[]> {
   const list = await store.loadShoppingList();
-  const item = list.addManual(input);
+  const added = list.write(text);
+  if (added.length === 0) throw new DomainError("品名を入力してください");
   await store.save({ shopping: list.pullChanges() });
-  return item;
+  return added;
+}
+
+export async function addShoppingDivider(store: Store): Promise<ShoppingEntry> {
+  const list = await store.loadShoppingList();
+  const divider = list.addDivider();
+  await store.save({ shopping: list.pullChanges() });
+  return divider;
+}
+
+/** 書いた物を 1 行の文章として直す */
+export async function editShoppingItem(store: Store, id: string, text: string) {
+  const list = await store.loadShoppingList();
+  if (existing(list.all(), [id]).length === 0) return;
+  list.edit(id as ShoppingItemId, text);
+  await store.save({ shopping: list.pullChanges() });
+}
+
+/** 並べ替え: ids を beforeId の手前に動かす（null なら一番下） */
+export async function moveShoppingEntries(store: Store, ids: string[], beforeId: string | null) {
+  const list = await store.loadShoppingList();
+  const target = beforeId && existing(list.all(), [beforeId]).length > 0 ? (beforeId as ShoppingItemId) : null;
+  list.moveBefore(existing(list.all(), ids), target);
+  await store.save({ shopping: list.pullChanges() });
 }
 
 export async function markBought(store: Store, ids: string[], today: CalendarDate) {
@@ -201,7 +228,7 @@ export async function removeShoppingItems(store: Store, ids: string[]) {
 }
 
 /** 2 人で同時に操作したとき、相手がすでに消した買う物は無視する */
-function existing(items: readonly ShoppingItem[], ids: string[]): ShoppingItemId[] {
+function existing(items: readonly ShoppingEntry[], ids: string[]): ShoppingItemId[] {
   const known = new Set<string>(items.map((i) => i.id));
   return ids.filter((id) => known.has(id)) as ShoppingItemId[];
 }

@@ -9,6 +9,7 @@
 | [context-map.md](context-map.md) | 領域（境界づけられたコンテキスト）の分け方 |
 | [domain-model.md](domain-model.md) | 集約・不変条件・コンテキスト間のポリシー |
 | [decisions.md](decisions.md) | 設計上の判断（一般的な DDD から意図的に外したこと）と、見直す条件 |
+| [learning.md](learning.md) | このコードを教材に、開発者として DDD を学ぶための読み方・練習課題 |
 
 ## コードの構成
 

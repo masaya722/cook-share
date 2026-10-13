@@ -18,12 +18,16 @@ src/domain/            ドメイン層。Next.js・Supabase に依存しない�
   menu/                献立: 食事（品・残り物・外食）
   shopping/            買い出し: 買い物リスト、献立と連動するポリシー
 src/application/       ユースケース（献立に品を加える、買った 等）。保存先は Store インターフェースで受け取る
-src/infrastructure/    Store の Supabase 実装と、DB の行とドメインの変換
+src/infrastructure/    Store の Supabase 実装と、DB の行とドメインの変換（古い形式のデータもここで読み替える）
 src/app/actions.ts     画面から呼ぶ Server Actions（ログイン確認 → ユースケース）
-src/lib/, src/components/, src/app/   画面
+src/lib/import/        取り込み（腐敗防止層）: YouTube・Web・Claude の形式をレシピの下書きに翻訳
+src/lib/meals.ts       献立画面に出すための読み込み（ドメイン層を通さない読み取り専用の形）
+src/components/, src/app/   画面
+supabase/migrations/   DB の変更（番号順に SQL Editor で実行する）
 ```
 
-ドメイン層のルールは `npm test` で確認できる（`*.test.ts` がそのまま仕様の一覧になっている）。
+ルールは `npm test` で確認できる（`*.test.ts` がそのまま仕様の一覧になっている）。
+テストはメモリ上の保存先（`InMemoryStore`）で動くので、Supabase への問い合わせ文は確かめられない。問い合わせ文を変えたときは、本番の Supabase で解析が通るかを別に確かめる。
 
 ## 進め方
 
@@ -32,6 +36,6 @@ src/lib/, src/components/, src/app/   画面
 | 1. ドメイン層 | ルールをテスト付きで `src/domain/` に書く。買い物リストの合算をドメイン層に置き換える | 完了 |
 | 2. 買い出し | 買い物リストを保存して家族で共有。献立と自動連動、手で追加、チェック、使う日 | 完了 |
 | 3. 献立 | 食事のまとまり、作る人数、外食、残り物、レシピ削除前の確認 | 完了 |
-| 4. 取り込み | AI が基準人数と「食材・下ごしらえ」を分けて読み取る。レシピの編集画面も対応 | 完了 |
+| 4. 取り込み | AI が基準人数と「食材・下ごしらえ」を分けて読み取る。レシピの編集画面も対応 | 実装済み（`0005_recipe_servings.sql` の実行と本番への反映待ち） |
 
 献立（食事の集約）と買い物リストの変更は、ユースケースがドメイン層で決め、`save_meals_and_shopping`（Postgres 関数）で 1 つのトランザクションとして保存する。画面に出すための読み込み（`src/lib/meals.ts`）はドメイン層を通さず、表示に必要な形で直接読む。

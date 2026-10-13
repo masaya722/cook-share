@@ -3,6 +3,7 @@ import type { Recipe, RecipeId } from "@/domain/recipe/recipe";
 import { HOUSEHOLD_SERVINGS } from "@/domain/recipe/servings";
 import { type CalendarDate, compareDates } from "@/domain/shared/calendar-date";
 import { DomainError } from "@/domain/shared/domain-error";
+import * as menu from "@/domain/menu/menu-service";
 import { applyMenuEvents } from "@/domain/shopping/menu-policy";
 import type { ShoppingItem, ShoppingItemId, ShoppingList } from "@/domain/shopping/shopping-list";
 import type { Store } from "./store";
@@ -28,15 +29,15 @@ async function recipesFor(store: Store, events: readonly MenuEvent[]) {
 async function changeMeals(store: Store, meals: Meal[], extra: { recipesDelete?: string[] } = {}) {
   const events = meals.flatMap((m) => m.pullEvents());
 
-  const removedDishIds = events.filter((e) => e.type === "DishRemoved").map((e) => e.dishId);
-  const affected: Meal[] = [];
+  const removedDishIds = events.flatMap((e) => (e.type === "DishRemoved" ? [e.dishId] : []));
+  let affected: Meal[] = [];
   if (removedDishIds.length > 0) {
-    for (const other of await store.loadMealsWithLeftoversOf(removedDishIds)) {
-      const meal = meals.find((m) => m.id === other.id) ?? other;
-      for (const id of removedDishIds) meal.removeLeftover(id);
-      meal.pullEvents();
-      if (!meals.includes(meal)) affected.push(meal);
-    }
+    // 手元で変えている食事を読み直すと変更が失われるので、同じ食事は手元のものを使う
+    const loaded = await store.loadMealsWithLeftoversOf(removedDishIds);
+    const mealsWithLeftovers = loaded.map((other) => meals.find((m) => m.id === other.id) ?? other);
+    const changed = menu.removeLeftoversOfRemovedDishes(events, mealsWithLeftovers);
+    events.push(...changed.flatMap((m) => m.pullEvents()));
+    affected = changed.filter((m) => !meals.includes(m));
   }
 
   const [list, recipeOf] = await Promise.all([store.loadShoppingList(), recipesFor(store, events)]);
@@ -76,14 +77,11 @@ export async function removeDish(store: Store, dishId: string) {
 
 /** 作る人数を変える。買い物リストの分量も合わせて変わる */
 export async function changeServings(store: Store, dishId: string, servingsToCook: number) {
-  const meal = await mealOfDish(store, dishId);
-  if (servingsToCook <= HOUSEHOLD_SERVINGS) {
-    const usedAsLeftover = await store.loadMealsWithLeftoversOf([dishId]);
-    if (usedAsLeftover.length > 0) {
-      throw new DomainError("残り物として献立に入れている日があります。先にその残り物を外してください");
-    }
-  }
-  meal.changeServings(dishId as DishId, servingsToCook);
+  const [meal, mealsUsingAsLeftover] = await Promise.all([
+    mealOfDish(store, dishId),
+    store.loadMealsWithLeftoversOf([dishId]),
+  ]);
+  menu.changeServings(meal, dishId as DishId, servingsToCook, mealsUsingAsLeftover);
   await changeMeals(store, [meal]);
 }
 

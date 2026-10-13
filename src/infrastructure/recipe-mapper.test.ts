@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Quantity } from "@/domain/recipe/quantity";
-import { normalizeIngredientRows, toDomainRecipe } from "./recipe-mapper";
+import type { RecipeDraft } from "@/lib/types";
+import { normalizeIngredientRows, recipeFromDraft, toDomainRecipe, toRecipeRow } from "./recipe-mapper";
 
 describe("DB の行からレシピを作る", () => {
   it("新しい形式: 人数は数値、材料は食材・分量・下ごしらえ", () => {
@@ -47,5 +48,50 @@ describe("編集画面に出す材料", () => {
       { name: "豚肉（ロース）", amount: "300g", preparation: "" },
       { name: "塩", amount: "少々", preparation: "" },
     ]);
+  });
+});
+
+describe("編集画面の入力を保存する形にする", () => {
+  const draft: RecipeDraft = {
+    title: " 生姜焼き ",
+    source_url: "https://example.com/shogayaki",
+    source_type: "web",
+    image_url: null,
+    servings: null,
+    cook_time: "15分",
+    description: null,
+    ingredients: [
+      { name: "豚ロース肉", amount: "0.5パック", preparation: "薄切り" },
+      { name: "", amount: "", preparation: "" },
+    ],
+    steps: ["焼く", ""],
+    tags: ["和食", "和食"],
+    memo: null,
+  };
+
+  it("ルールに沿って整え、分量の表記と「記載なし」の人数はそのまま保存する", () => {
+    const row = toRecipeRow(recipeFromDraft("r1", draft));
+    expect(row).toMatchObject({
+      title: "生姜焼き",
+      servings: null,
+      ingredients: [{ name: "豚ロース肉", amount: "0.5パック", preparation: "薄切り" }],
+      steps: ["焼く"],
+      tags: ["和食"],
+      source_type: "web",
+      source_url: "https://example.com/shogayaki",
+    });
+  });
+
+  it("料理名が空なら保存できない", () => {
+    expect(() => recipeFromDraft("r1", { ...draft, title: " " })).toThrow("料理名を入力してください");
+  });
+
+  it("出典の URL が http(s) でなければ保存できない", () => {
+    expect(() => recipeFromDraft("r1", { ...draft, source_url: "javascript:alert(1)" })).toThrow("http:// か https://");
+  });
+
+  it("保存済みのデータに不正な URL があっても、読み込みは失敗しない", () => {
+    const r = toDomainRecipe({ id: "r1", title: "古いレシピ", servings: 2, ingredients: [], source_type: "web", source_url: "ftp://x" });
+    expect(r.content.source).toEqual({ kind: "web", url: null });
   });
 });

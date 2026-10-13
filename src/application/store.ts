@@ -6,6 +6,8 @@ import type { ShoppingList, ShoppingListChanges } from "@/domain/shopping/shoppi
 /** アプリケーション層が使う保存先。本番は Supabase、テストはメモリ上の実装 */
 export interface Store {
   loadRecipe(id: string): Promise<Recipe | null>;
+  /** レシピを保存する。mode が insert なら新しく作り、update なら上書きする */
+  saveRecipe(recipe: Recipe, mode: "insert" | "update"): Promise<void>;
 
   loadMeal(date: CalendarDate, mealTime: MealTime): Promise<Meal | null>;
   loadMealOfDish(dishId: string): Promise<Meal | null>;

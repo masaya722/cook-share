@@ -122,6 +122,11 @@ export async function removeLeftover(
   await changeMeals(store, [meal]);
 }
 
+/** レシピを保存する。ルール（R1・R2・R7）はレシピを作る時点（Recipe.create）で守られている */
+export async function saveRecipe(store: Store, recipe: Recipe, mode: "insert" | "update") {
+  await store.saveRecipe(recipe, mode);
+}
+
 /** R5: 今日以降の献立でこのレシピを使っている食事（削除前の確認に使う） */
 export async function upcomingUsesOfRecipe(store: Store, recipeId: string, today: CalendarDate) {
   const meals = await store.loadMealsWithDishesOfRecipe(recipeId);

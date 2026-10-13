@@ -18,6 +18,7 @@ import {
   removeDish,
   removeLeftover,
   removeShoppingItems,
+  saveRecipe,
   upcomingUsesOfRecipe,
 } from "./use-cases";
 
@@ -184,5 +185,22 @@ describe("買い物リストを開く", () => {
     const milk = await addShoppingItem(store, { food: "牛乳" });
     await removeShoppingItems(store, [milk.id]);
     await expect(markBought(store, [milk.id], today)).resolves.toBeUndefined();
+  });
+});
+
+describe("レシピの保存", () => {
+  it("新しいレシピを保存すると、献立に入れられる", async () => {
+    await saveRecipe(
+      store,
+      Recipe.create({ id: "pasta", title: "パスタ", servings: Servings.of(1), ingredients: [Ingredient.of("パスタ", "100g")] }),
+      "insert",
+    );
+    await planDish(store, { date: today, mealTime: "lunch", recipeId: "pasta" }, newId);
+    expect((await shopping())["パスタ"]).toBe("200g");
+  });
+
+  it("ないレシピは上書きできない", async () => {
+    const r = Recipe.create({ id: "nope", title: "x", servings: Servings.assumed(), ingredients: [] });
+    await expect(saveRecipe(store, r, "update")).rejects.toThrow();
   });
 });

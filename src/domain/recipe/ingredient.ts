@@ -5,6 +5,8 @@ import { Quantity } from "./quantity";
 export type Ingredient = {
   readonly food: Food;
   readonly quantity: Quantity;
+  /** 書かれたままの分量（「0.5個」を「1/2個」に書き換えずに保存・表示するため） */
+  readonly amountText: string;
   /** みじん切り・薄切りなど。買う物には影響しない */
   readonly preparation: string;
 };
@@ -15,7 +17,8 @@ const PREPARATION_WORDS =
 
 export const Ingredient = {
   of(food: string, quantity: string, preparation = ""): Ingredient {
-    return { food: Food.of(food), quantity: Quantity.parse(quantity), preparation: preparation.trim() };
+    const amountText = quantity.trim();
+    return { food: Food.of(food), quantity: Quantity.parse(amountText), amountText, preparation: preparation.trim() };
   },
 
   /**
@@ -37,6 +40,8 @@ export const Ingredient = {
   },
 
   scale(ingredient: Ingredient, factor: number): Ingredient {
-    return { ...ingredient, quantity: Quantity.scale(ingredient.quantity, factor) };
+    if (factor === 1) return ingredient;
+    const quantity = Quantity.scale(ingredient.quantity, factor);
+    return { ...ingredient, quantity, amountText: Quantity.format(quantity) };
   },
 };

@@ -5,6 +5,7 @@ import { Ingredient } from "./ingredient";
 import { Quantity } from "./quantity";
 import { Recipe } from "./recipe";
 import { Servings } from "./servings";
+import { Source } from "./source";
 
 describe("食材", () => {
   it("部位や種類が違えば別の食材", () => {
@@ -128,5 +129,48 @@ describe("レシピ", () => {
       ingredients: [Ingredient.of("パスタ", "100g")],
     });
     expect(Quantity.format(r.ingredientsFor(2)[0].quantity)).toBe("200g");
+  });
+});
+
+describe("レシピの中身", () => {
+  it("空の手順や重複したタグは取り除く", () => {
+    const r = Recipe.create({
+      id: "r1",
+      title: " カレー ",
+      servings: Servings.assumed(),
+      ingredients: [],
+      content: { steps: ["切る", " ", "煮る"], tags: ["和食", "和食", " ", "作り置き"], memo: "  " },
+    });
+    expect(r.title).toBe("カレー");
+    expect(r.content.steps).toEqual(["切る", "煮る"]);
+    expect(r.content.tags).toEqual(["和食", "作り置き"]);
+    expect(r.content.memo).toBeNull();
+  });
+
+  it("出典がなければ手入力のレシピ", () => {
+    const r = Recipe.create({ id: "r1", title: "カレー", servings: Servings.assumed(), ingredients: [] });
+    expect(r.content.source).toEqual({ kind: "manual", url: null });
+  });
+});
+
+describe("出典", () => {
+  it("http:// か https:// で始まる URL だけ受け付ける", () => {
+    expect(Source.of("web", " https://example.com/r ")).toEqual({ kind: "web", url: "https://example.com/r" });
+    expect(() => Source.of("web", "javascript:alert(1)")).toThrow("http:// か https://");
+  });
+
+  it("URL が空なら出典の URL はない", () => {
+    expect(Source.of("manual", "")).toEqual({ kind: "manual", url: null });
+  });
+});
+
+describe("書かれたままの分量", () => {
+  it("分量の表記は書き換えずに持つ", () => {
+    expect(Ingredient.of("玉ねぎ", " 0.5個 ").amountText).toBe("0.5個");
+  });
+
+  it("人数に合わせて増減したときは、増減後の分量になる", () => {
+    const scaled = Ingredient.scale(Ingredient.of("玉ねぎ", "0.5個"), 2);
+    expect(scaled.amountText).toBe("1個");
   });
 });

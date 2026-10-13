@@ -2,12 +2,11 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { deleteRecipeAction, upcomingUsesOfRecipeAction } from "@/app/actions";
+import { deleteRecipeAction, saveRecipeAction, upcomingUsesOfRecipeAction } from "@/app/actions";
 import { MEAL_TIME_LABELS } from "@/domain/menu/meal";
 import { formatShort, today } from "@/lib/date";
 import { normalizeIngredientRows } from "@/infrastructure/recipe-mapper";
 import { invalidateMeals } from "@/lib/meals";
-import { createClient } from "@/lib/supabase/client";
 import type { IngredientRow, RecipeDraft } from "@/lib/types";
 import { ServingsStepper } from "./servings-stepper";
 import { Spinner, buttonClass, inputClass, subtleButtonClass } from "./ui";
@@ -58,39 +57,19 @@ export function RecipeForm({ initial, recipeId }: { initial: RecipeDraft; recipe
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!draft.title.trim()) {
-      setError("料理名を入力してください");
-      return;
-    }
-    if (draft.source_url && !/^https?:\/\//.test(draft.source_url)) {
-      setError("元の URL は http:// か https:// で始まる必要があります");
-      return;
-    }
     setSaving(true);
     setError(null);
-
-    const payload: RecipeDraft = {
-      ...draft,
-      title: draft.title.trim(),
-      ingredients: draft.ingredients
-        .map((i) => ({ name: i.name.trim(), amount: i.amount.trim(), preparation: (i.preparation ?? "").trim() }))
-        .filter((i) => i.name),
-      steps: draft.steps.map((s) => s.trim()).filter(Boolean),
-      tags: [...new Set(tagsText.split(/[、,\s]+/).map((t) => t.trim()).filter(Boolean))],
-    };
-
-    const supabase = createClient();
-    const { data, error } = recipeId
-      ? await supabase.from("recipes").update(payload).eq("id", recipeId).select("id").single()
-      : await supabase.from("recipes").insert(payload).select("id").single();
-
-    if (error || !data) {
-      setError("保存できませんでした");
+    // 料理名は必須などのルールは、サーバーでドメインのレシピに変換するときに確かめる
+    const result = await saveRecipeAction({
+      id: recipeId,
+      draft: { ...draft, tags: tagsText.split(/[、,\s]+/) },
+    }).catch(() => ({ ok: false, error: "保存できませんでした。通信状況を確認してください" }) as const);
+    if (!result.ok) {
+      setError(result.error);
       setSaving(false);
       return;
     }
-    router.replace(`/recipes/${data.id}`);
-    router.refresh();
+    router.replace(`/recipes/${result.value}`);
   }
 
   async function onDelete() {

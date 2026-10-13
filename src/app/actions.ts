@@ -6,7 +6,9 @@ import type { MealTime } from "@/domain/menu/meal";
 import { calendarDate } from "@/domain/shared/calendar-date";
 import { DomainError } from "@/domain/shared/domain-error";
 import { type ShoppingItemRow, toShoppingItemRow } from "@/infrastructure/shopping-item-mapper";
+import { recipeFromDraft } from "@/infrastructure/recipe-mapper";
 import { SupabaseStore } from "@/infrastructure/supabase-store";
+import type { RecipeDraft } from "@/lib/types";
 import { createClient } from "@/lib/supabase/server";
 
 /** 画面に返す結果。ドメインのルール違反はメッセージとして返し、それ以外は例外のまま */
@@ -75,6 +77,17 @@ export async function removeLeftoverAction(input: MealSlot & { sourceDishId: str
 
 export async function upcomingUsesOfRecipeAction(recipeId: string, today: string) {
   return run((store) => useCases.upcomingUsesOfRecipe(store, recipeId, calendarDate(today)));
+}
+
+/** レシピを保存する。画面の入力はドメインのレシピに変換する時点でルールを確かめる */
+export async function saveRecipeAction(input: { id?: string; draft: RecipeDraft }): Promise<ActionResult<string>> {
+  const result = await run(async (store) => {
+    const id = input.id ?? newId();
+    await useCases.saveRecipe(store, recipeFromDraft(id, input.draft), input.id ? "update" : "insert");
+    return id;
+  });
+  if (result.ok) refresh();
+  return result;
 }
 
 export async function deleteRecipeAction(recipeId: string) {

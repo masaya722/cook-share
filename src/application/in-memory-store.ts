@@ -28,6 +28,10 @@ export class InMemoryStore implements Store {
   async loadRecipe(id: string) {
     return this.recipes.get(id) ?? null;
   }
+  async saveRecipe(recipe: Recipe, mode: "insert" | "update") {
+    if (mode === "update" && !this.recipes.has(recipe.id)) throw new Error("レシピがありません");
+    this.recipes.set(recipe.id, recipe);
+  }
   async loadMeal(date: CalendarDate, mealTime: MealTime) {
     const s = [...this.meals.values()].find((m) => m.date === date && m.mealTime === mealTime);
     return s ? this.load(s) : null;

@@ -1,11 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Store } from "@/application/store";
 import { type DishId, type DishInMeal, Meal, type MealTime } from "@/domain/menu/meal";
-import type { RecipeId } from "@/domain/recipe/recipe";
+import type { Recipe, RecipeId } from "@/domain/recipe/recipe";
 import type { CalendarDate } from "@/domain/shared/calendar-date";
 import { ShoppingList } from "@/domain/shopping/shopping-list";
 import type { RecipeRow } from "@/lib/types";
-import { toDomainRecipe } from "./recipe-mapper";
+import { toDomainRecipe, toRecipeRow } from "./recipe-mapper";
 import { type ShoppingItemRow, toShoppingItem, toShoppingItemRow } from "./shopping-item-mapper";
 
 // meals と dishes は「食事の品」と「残り物（leftovers 経由）」の 2 通りでつながるので、使う外部キーを明示する。
@@ -59,6 +59,15 @@ export class SupabaseStore implements Store {
       await this.db.from("recipes").select("id, title, servings, ingredients").eq("id", id).maybeSingle(),
     );
     return row ? toDomainRecipe(row as Pick<RecipeRow, "id" | "title" | "servings" | "ingredients">) : null;
+  }
+
+  async saveRecipe(recipe: Recipe, mode: "insert" | "update") {
+    const row = toRecipeRow(recipe);
+    check(
+      mode === "insert"
+        ? await this.db.from("recipes").insert({ id: recipe.id, ...row }).select("id").single()
+        : await this.db.from("recipes").update(row).eq("id", recipe.id).select("id").single(),
+    );
   }
 
   async loadMeal(date: CalendarDate, mealTime: MealTime) {

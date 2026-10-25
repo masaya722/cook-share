@@ -7,7 +7,7 @@
 | [glossary.md](glossary.md) | ユビキタス言語（用語集）。コード上の名前もここで決める |
 | [event-storming.md](event-storming.md) | 暮らしの中で起きる出来事と、決まったこと |
 | [context-map.md](context-map.md) | 領域（境界づけられたコンテキスト）の分け方 |
-| [domain-model.md](domain-model.md) | 集約・不変条件・コンテキスト間のポリシー |
+| [domain-model.md](domain-model.md) | 集約・不変条件・コンテキスト間のつながり |
 | [decisions.md](decisions.md) | 設計上の判断（一般的な DDD から意図的に外したこと）と、見直す条件 |
 | [learning.md](learning.md) | このコードを教材に、開発者として DDD を学ぶための読み方・練習課題 |
 
@@ -18,8 +18,8 @@ src/domain/            ドメイン層。Next.js・Supabase に依存しない�
   shared/              暦の日付、ドメインエラー
   recipe/              レシピ帳: 食材・分量・基準人数・材料・レシピ
   menu/                献立: 食事（品・残り物・外食）
-  shopping/            買い出し: 買い物リスト、献立と連動するポリシー
-src/application/       ユースケース（献立に品を加える、買った 等）。保存先は Store インターフェースで受け取る
+  shopping/            買い出し: 買い物メモ（☐ ☑ の行、献立の材料の反映、2 人の書き換えのまとめ）
+src/application/       ユースケース（献立に品を加える、献立の材料を反映する 等）。保存先は Store インターフェースで受け取る
 src/infrastructure/    Store の Supabase 実装と、DB の行とドメインの変換（古い形式のデータもここで読み替える）
 src/app/actions.ts     画面から呼ぶ Server Actions（ログイン確認 → ユースケース）
 src/lib/import/        取り込み（腐敗防止層）: YouTube・Web・Claude の形式をレシピの下書きに翻訳
@@ -36,8 +36,9 @@ supabase/migrations/   DB の変更（番号順に SQL Editor で実行する）
 | 段階 | 内容 | 状態 |
 |---|---|---|
 | 1. ドメイン層 | ルールをテスト付きで `src/domain/` に書く。買い物リストの合算をドメイン層に置き換える | 完了 |
-| 2. 買い出し | 買い物リストを保存して家族で共有。献立と自動連動、手で追加、チェック、使う日 | 完了 |
+| 2. 買い出し | 買い物リストを保存して家族で共有。献立と自動連動、手で追加、チェック、使う日 | 完了（後に買い物メモへ作り直し） |
+| 5. 買い物メモ | 買い物リストを自由に書けるメモ帳にする。☐ ☑ のチェック、期間を選んで献立の材料を反映 | 完了 |
 | 3. 献立 | 食事のまとまり、作る人数、外食、残り物、レシピ削除前の確認 | 完了 |
 | 4. 取り込み | AI が基準人数と「食材・下ごしらえ」を分けて読み取る。レシピの編集画面も対応 | 完了 |
 
-献立（食事の集約）と買い物リストの変更は、ユースケースがドメイン層で決め、`save_meals_and_shopping`（Postgres 関数）で 1 つのトランザクションとして保存する（[D1](decisions.md)）。画面に出すための読み込み（`src/lib/meals.ts`）はドメイン層を通さず、表示に必要な形で直接読む（[D2](decisions.md)）。
+献立（食事の集約）の変更は、ユースケースがドメイン層で決め、`save_meals_and_shopping`（Postgres 関数）で 1 つのトランザクションとして保存する（[D1](decisions.md)）。買い物メモは版の番号を添えて保存し、ぶつかったら行単位でまとめる（[D6](decisions.md)）。画面に出すための読み込み（`src/lib/meals.ts`）はドメイン層を通さず、表示に必要な形で直接読む（[D2](decisions.md)）。

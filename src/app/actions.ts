@@ -5,7 +5,6 @@ import * as useCases from "@/application/use-cases";
 import type { MealTime } from "@/domain/menu/meal";
 import { calendarDate } from "@/domain/shared/calendar-date";
 import { DomainError } from "@/domain/shared/domain-error";
-import { type ShoppingItemRow, toShoppingItemRow } from "@/infrastructure/shopping-item-mapper";
 import { recipeFromDraft } from "@/infrastructure/recipe-mapper";
 import { SupabaseStore } from "@/infrastructure/supabase-store";
 import type { RecipeDraft } from "@/lib/types";
@@ -96,48 +95,33 @@ export async function deleteRecipeAction(recipeId: string) {
   return result;
 }
 
-export async function openShoppingListAction(today: string): Promise<ActionResult<ShoppingItemRow[]>> {
-  return run(async (store) => (await useCases.openShoppingList(store, calendarDate(today))).map(toShoppingItemRow));
-}
+/** 画面に渡す買い物メモの形 */
+export type ShoppingMemoView = { text: string; version: number };
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const toView = (memo: { text: string; version: number }): ShoppingMemoView => ({ text: memo.text, version: memo.version });
+
+export async function openShoppingMemoAction(): Promise<ActionResult<ShoppingMemoView>> {
+  return run(async (store) => toView(await useCases.openShoppingMemo(store)));
+}
 
 /**
- * メモ帳のように書き足す（1 行でも、何行まとめてでも）。afterId の行のすぐ下に入れる。
- * 画面が先に同じ操作をして表示しているので、新しい物の id は画面が決めた newIds を使う。
+ * 買い物メモを保存する。baseText・baseVersion は手元で書き始めたときの内容。
+ * 相手が先に保存していたら行単位でまとめた結果を返す（merged = true）。
  */
-export async function writeShoppingAction(input: {
+export async function saveShoppingMemoAction(input: {
+  baseText: string;
+  baseVersion: number;
   text: string;
-  afterId?: string | null;
-  newIds?: string[];
-}): Promise<ActionResult<ShoppingItemRow[]>> {
-  const newIds = (input.newIds ?? []).filter((id) => UUID.test(id)).slice(0, 500);
-  const afterId = input.afterId && UUID.test(input.afterId) ? input.afterId : null;
+}): Promise<ActionResult<ShoppingMemoView & { merged: boolean }>> {
+  return run(async (store) => {
+    const { memo, merged } = await useCases.saveShoppingMemoText(store, input);
+    return { ...toView(memo), merged };
+  });
+}
+
+/** 期間内の献立の材料を、まだ反映していない品の分だけメモに反映する */
+export async function reflectMenuIngredientsAction(input: { from: string; to: string }): Promise<ActionResult<ShoppingMemoView>> {
   return run(async (store) =>
-    (await useCases.writeShopping(store, input.text, { afterId, newIds })).map(toShoppingItemRow),
+    toView(await useCases.reflectMenuIngredients(store, { from: calendarDate(input.from), to: calendarDate(input.to) })),
   );
-}
-
-export async function addShoppingDividerAction(): Promise<ActionResult<ShoppingItemRow>> {
-  return run(async (store) => toShoppingItemRow(await useCases.addShoppingDivider(store)));
-}
-
-export async function editShoppingItemAction(id: string, text: string) {
-  return run((store) => useCases.editShoppingItem(store, id, text));
-}
-
-export async function moveShoppingEntriesAction(ids: string[], beforeId: string | null) {
-  return run((store) => useCases.moveShoppingEntries(store, ids, beforeId));
-}
-
-export async function markBoughtAction(ids: string[], today: string) {
-  return run((store) => useCases.markBought(store, ids, calendarDate(today)));
-}
-
-export async function unmarkBoughtAction(ids: string[]) {
-  return run((store) => useCases.unmarkBought(store, ids));
-}
-
-export async function removeShoppingItemsAction(ids: string[]) {
-  return run((store) => useCases.removeShoppingItems(store, ids));
 }

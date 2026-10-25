@@ -63,6 +63,20 @@ export const Quantity = {
     return { ...a, value: a.value + b.value };
   },
 
+  /** 同じ単位どうしは合算し、合算できない分量（少々、別の単位）は並べた文字列にする（「大さじ3 ＋ 少々」） */
+  sumText(quantities: readonly Quantity[]): string {
+    const summed: Quantity[] = [];
+    for (const quantity of quantities) {
+      if (quantity.kind === "uncountable" && !quantity.text) continue;
+      const index = summed.findIndex((q) => Quantity.canAdd(q, quantity));
+      if (index >= 0) summed[index] = Quantity.add(summed[index], quantity);
+      else if (!summed.some((q) => q.kind === "uncountable" && Quantity.format(q) === Quantity.format(quantity))) {
+        summed.push(quantity);
+      }
+    }
+    return summed.map(Quantity.format).join(" ＋ ");
+  },
+
   format(q: Quantity): string {
     if (q.kind === "uncountable") return q.text;
     return `${q.prefix}${formatNumber(q.value, q.suffix)}${q.suffix}`;

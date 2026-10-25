@@ -1,654 +1,405 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
-  addShoppingDividerAction,
-  editShoppingItemAction,
-  markBoughtAction,
-  moveShoppingEntriesAction,
-  openShoppingListAction,
-  removeShoppingItemsAction,
-  unmarkBoughtAction,
-  writeShoppingAction,
+  openShoppingMemoAction,
+  reflectMenuIngredientsAction,
+  saveShoppingMemoAction,
+  type ShoppingMemoView,
 } from "@/app/actions";
-import { addDays, type CalendarDate, compareDates } from "@/domain/shared/calendar-date";
+import { addDays, type CalendarDate } from "@/domain/shared/calendar-date";
 import {
-  type DividerRow,
-  ShoppingList as ShoppingListModel,
-  type ShoppingItemId,
-  type ShoppingRow,
-} from "@/domain/shopping/shopping-list";
-import { LINE_BREAK, parseLines } from "@/domain/shopping/shopping-line";
-import {
-  SHOPPING_ITEM_COLUMNS,
-  type ShoppingItemRow,
-  toShoppingEntry,
-  toShoppingItemRow,
-} from "@/infrastructure/shopping-item-mapper";
-import { formatShort } from "@/lib/date";
+  DONE_BOX,
+  memoLines,
+  mergeMemoText,
+  normalizeText,
+  OPEN_BOX,
+  parseMemoLine,
+  removeDoneLines,
+  toggleLine,
+} from "@/domain/shopping/shopping-memo";
 import { createClient } from "@/lib/supabase/client";
 import { useToday } from "@/lib/use-today";
-import { ShoppingRowsSkeleton, ShoppingSkeleton } from "./skeletons";
-import { subtleButtonClass } from "./ui";
+import { ShoppingRowsSkeleton } from "./skeletons";
+import { Spinner, subtleButtonClass } from "./ui";
 
 // タブを行き来したときに前回の内容をすぐ出すための、端末内だけのキャッシュ
-let cache: ShoppingItemRow[] | null = null;
-
-const FILTERS: { label: string; withinDays?: number }[] = [
-  { label: "すべて" },
-  { label: "今日", withinDays: 1 },
-  { label: "3日以内", withinDays: 3 },
-  { label: "1週間", withinDays: 7 },
-];
+let cache: ShoppingMemoView | null = null;
 
 const SAVE_FAILED = "保存できませんでした。通信状況を確認してください";
+const SAVE_DELAY_MS = 800;
 
-type Result = { ok: true } | { ok: false; error: string };
-type Entry = ShoppingRow | DividerRow;
+type Mode = "write" | "shop";
+const MODE_KEY = "shopping-memo-mode";
+
+function readMode(): Mode {
+  try {
+    return localStorage.getItem(MODE_KEY) === "shop" ? "shop" : "write";
+  } catch {
+    return "write";
+  }
+}
+
+/** 献立の材料を反映する期間 */
+const RANGES = [
+  { label: "今日", from: 0, to: 0 },
+  { label: "明日", from: 1, to: 1 },
+  { label: "3日分", from: 0, to: 2 },
+  { label: "1週間", from: 0, to: 6 },
+];
 
 /**
- * 画面側でもドメインの買い物リストを動かして、結果をすぐ画面に出す（保存はサーバーで同じ操作をする）。
- * 同じ入力からは同じ結果になるので、書き足し・並べ替えなども保存の完了を待たずに反映できる。
+ * 買い物メモ。家族で 1 枚の、自由に書けるメモ帳。
+ * 「書く」では普通のメモ帳として書き、「買い物中」では行をタップして ☐ ↔ ☑ を切り替える。
+ * 書いた内容は少し待ってから自動で保存する。相手の保存とぶつかったら、行単位でまとめる。
  */
-function applyLocally(rows: ShoppingItemRow[], change: (list: ShoppingListModel) => void): ShoppingItemRow[] {
-  const list = ShoppingListModel.reconstitute(rows.map(toShoppingEntry));
-  change(list);
-  const { upserted, removedIds } = list.pullChanges();
-  const removed = new Set<string>(removedIds);
-  const updated = new Map(upserted.map((e) => [e.id as string, toShoppingItemRow(e)]));
-  return [
-    ...rows.filter((r) => !removed.has(r.id)).map((r) => updated.get(r.id) ?? r),
-    ...[...updated.values()].filter((u) => !rows.some((r) => r.id === u.id)),
-  ];
-}
-
-const idsOf = (e: Entry): ShoppingItemId[] => (e.kind === "row" ? [...e.itemIds] : [e.id]);
-const anchorOf = (e: Entry): ShoppingItemId => (e.kind === "row" ? e.anchorId : e.id);
-/** その id を含む行か区切りか */
-const contains = (e: Entry, id: ShoppingItemId) => (e.kind === "row" ? e.itemIds.includes(id) : e.id === id);
-
 export function ShoppingList() {
-  // 「今日」は端末の日付で決めるので、サーバーでは描画しない
   const today = useToday() as CalendarDate | null;
-  return today ? <ShoppingListBody today={today} /> : <ShoppingSkeleton />;
-}
-
-function ShoppingListBody({ today }: { today: CalendarDate }) {
-  const [items, setItems] = useState<ShoppingItemRow[] | null>(cache);
-  const [withinDays, setWithinDays] = useState<number | undefined>(undefined);
+  // 最後にサーバーとそろえた内容（2 人の書き換えをまとめるときの「元」）
+  const [base, setBase] = useState<ShoppingMemoView | null>(cache);
+  const [text, setText] = useState(cache?.text ?? "");
+  const [mode, setMode] = useState<Mode>("write");
+  const [status, setStatus] = useState<"saved" | "saving" | "merged">("saved");
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  // 書き足す行をどの行の下に出すか（null なら末尾）
-  const [draftAfter, setDraftAfter] = useState<ShoppingItemId | null>(null);
-  const draftRef = useRef<HTMLTextAreaElement>(null);
-  // 保存の完了を待たずに続けて操作しても、最新の一覧をもとに変更できるようにする
-  const itemsRef = useRef(items);
+  const [reflecting, setReflecting] = useState<string | null>(null);
+  const [showRanges, setShowRanges] = useState(false);
 
-  function update(next: ShoppingItemRow[]) {
-    cache = next;
-    itemsRef.current = next;
-    setItems(next);
+  // 非同期の処理から最新の値を読むための控え
+  const latest = useRef({ base, text });
+  const saving = useRef<Promise<void> | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  function sync(next: { base?: ShoppingMemoView; text?: string }) {
+    latest.current = { ...latest.current, ...next };
+    if (next.base) {
+      cache = next.base;
+      setBase(next.base);
+    }
+    if (next.text !== undefined) setText(next.text);
   }
 
-  // 開いたときにサーバーで「前日までに買った物を消す」などを済ませてから読み込む
+  // 前回選んだモード（書く / 買い物中）を端末ごとに覚えておく
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 端末に保存した設定はブラウザでしか読めない
+    setMode(readMode());
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
-    openShoppingListAction(today)
+    openShoppingMemoAction()
       .then((result) => {
         if (cancelled) return;
-        if (result.ok) {
-          cache = result.value;
-          itemsRef.current = result.value;
-          setItems(result.value);
-        } else {
-          setError(result.error);
-        }
+        if (!result.ok) return setError(result.error);
+        // 読み込む前に書き始めていたら、行単位でまとめる
+        const { base: b, text: t } = latest.current;
+        const local = b && t !== b.text ? mergeMemoText(b.text, result.value.text, t) : result.value.text;
+        sync({ base: result.value, text: local });
       })
       .catch(() => {
-        if (!cancelled) setError("買い物リストを読み込めませんでした。通信状況を確認して開き直してください");
+        if (!cancelled) setError("買い物メモを読み込めませんでした。通信状況を確認して開き直してください");
       });
     return () => {
       cancelled = true;
     };
-  }, [today]);
+  }, []);
 
-  // もう一人が操作したら、すぐ画面に反映する
+  /** 手元の内容を保存する。保存中に呼ばれたら、終わってからもう一度保存する */
+  async function save(): Promise<void> {
+    clearTimeout(timer.current);
+    if (saving.current) {
+      await saving.current;
+      return save();
+    }
+    const { base: b, text: sent } = latest.current;
+    if (!b || sent === b.text) return setStatus("saved");
+
+    setStatus("saving");
+    saving.current = (async () => {
+      const result = await saveShoppingMemoAction({ baseText: b.text, baseVersion: b.version, text: sent }).catch(
+        () => ({ ok: false, error: SAVE_FAILED }) as const,
+      );
+      if (!result.ok) {
+        setError(result.error);
+        setStatus("saved");
+        return;
+      }
+      setError(null);
+      const saved = { text: result.value.text, version: result.value.version };
+      const now = latest.current.text;
+      // 保存している間にさらに書いていたら、その分は残す
+      const local = now === sent ? saved.text : mergeMemoText(sent, saved.text, now);
+      sync({ base: saved, text: local });
+      setStatus(result.value.merged ? "merged" : "saved");
+    })();
+    try {
+      await saving.current;
+    } finally {
+      saving.current = null;
+    }
+    if (latest.current.text !== latest.current.base?.text) scheduleSave();
+  }
+
+  function scheduleSave(delay = SAVE_DELAY_MS) {
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => void save(), delay);
+  }
+
+  function edit(next: string, delay?: number) {
+    sync({ text: next });
+    setStatus("saving");
+    scheduleSave(delay);
+  }
+
+  // もう一人が保存したら、すぐ画面に反映する（書きかけがあれば行単位でまとめる）
   useEffect(() => {
     const supabase = createClient();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const reload = () => {
-      clearTimeout(timer);
-      timer = setTimeout(async () => {
-        const { data } = await supabase.from("shopping_items").select(SHOPPING_ITEM_COLUMNS).order("position");
-        if (data) {
-          cache = data as unknown as ShoppingItemRow[];
-          itemsRef.current = cache;
-          setItems(cache);
-        }
-      }, 300);
+    const reload = async () => {
+      const { data } = await supabase.from("shopping_memo").select("text, version").maybeSingle();
+      const { base: b, text: t } = latest.current;
+      if (!data || (b && data.version <= b.version)) return;
+      const server = { text: normalizeText(data.text), version: data.version };
+      const local = b && t !== b.text ? mergeMemoText(b.text, server.text, t) : server.text;
+      sync({ base: server, text: local });
     };
     const channel = supabase
-      .channel("shopping_items")
-      .on("postgres_changes", { event: "*", schema: "public", table: "shopping_items" }, reload)
+      .channel("shopping_memo")
+      .on("postgres_changes", { event: "*", schema: "public", table: "shopping_memo" }, () => void reload())
       .subscribe();
     const onVisible = () => {
-      if (document.visibilityState === "visible") reload();
+      if (document.visibilityState === "visible") void reload();
+      // 画面を離れるときは、書きかけをすぐ保存する
+      else void save();
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
-      clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisible);
       void supabase.removeChannel(channel);
     };
+    // save は最新の値を latest から読むので、作り直す必要はない
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const view = useMemo(
-    () => (items ? ShoppingListModel.reconstitute(items.map(toShoppingEntry)).view({ today, withinDays }) : null),
-    [items, today, withinDays],
-  );
-
-  /** 画面を先に変え、保存に失敗したら元に戻す */
-  async function change(local: (list: ShoppingListModel) => void, save: () => Promise<Result>) {
-    const before = itemsRef.current ?? [];
+  async function reflect(range: (typeof RANGES)[number]) {
+    if (!today) return;
+    setShowRanges(false);
+    setReflecting(range.label);
     setError(null);
+    // 書きかけを先に保存してから反映する
+    await save();
+    const result = await reflectMenuIngredientsAction({
+      from: addDays(today, range.from),
+      to: addDays(today, range.to),
+    }).catch(() => ({ ok: false, error: SAVE_FAILED }) as const);
+    setReflecting(null);
+    if (!result.ok) return setError(result.error);
+    sync({ base: result.value, text: result.value.text });
+    setStatus("saved");
+  }
+
+  function changeMode(next: Mode) {
+    setMode(next);
     try {
-      update(applyLocally(before, local));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : SAVE_FAILED);
-      return false;
+      localStorage.setItem(MODE_KEY, next);
+    } catch {
+      // 保存できなくても切り替えは効く
     }
-    const result = await save().catch((): Result => ({ ok: false, error: SAVE_FAILED }));
-    if (!result.ok) {
-      update(before);
-      setError(result.error);
-    }
-    return result.ok;
   }
 
-  /**
-   * draftAfter の行の下に書き足す。新しい物の id は画面で決めてサーバーにも渡す（同じ結果になる）。
-   * 書き足した後は、書き足す行が今書いた物のすぐ下に移る（Enter で続けて書ける）。
-   */
-  function write(text: string, afterId: ShoppingItemId | null) {
-    const count = parseLines(text).length;
-    if (count === 0) return;
-    const newIds = Array.from({ length: count }, () => crypto.randomUUID());
-    setDraftAfter(newIds.at(-1)! as ShoppingItemId);
-    void change(
-      (list) => {
-        list.write(text, { afterId, newIds });
-      },
-      () => writeShoppingAction({ text, afterId, newIds }),
-    );
-  }
-
-  /** 書き足す行をこの行の下に出して、キーボードを閉じずにそこへ移る */
-  function openDraftAfter(id: ShoppingItemId) {
-    setDraftAfter(id);
-    draftRef.current?.focus();
-  }
-
-  function toggle(row: ShoppingRow) {
-    const ids = [...row.itemIds];
-    void change(
-      (list) => (row.bought ? list.unmarkBought(ids) : list.markBought(ids, today)),
-      () => (row.bought ? unmarkBoughtAction(ids) : markBoughtAction(ids, today)),
-    );
-  }
-
-  function remove(ids: readonly ShoppingItemId[]) {
-    void change(
-      (list) => list.remove(ids),
-      () => removeShoppingItemsAction([...ids]),
-    );
-  }
-
-  /** 1 行の文章として直す。全部消したら、メモ帳で行を消したのと同じくリストから消す */
-  function edit(row: ShoppingRow, text: string) {
-    if (!text.trim()) return remove(row.itemIds);
-    if (text.trim() === row.editText) return;
-    const id = row.itemIds[0];
-    void change(
-      (list) => list.edit(id, text),
-      () => editShoppingItemAction(id, text),
-    );
-  }
-
-  function move(ids: readonly ShoppingItemId[], beforeId: ShoppingItemId | null) {
-    void change(
-      (list) => list.moveBefore(ids, beforeId),
-      () => moveShoppingEntriesAction([...ids], beforeId),
-    );
-  }
-
-  async function addDivider() {
-    setError(null);
-    const result = await addShoppingDividerAction().catch(() => ({ ok: false, error: SAVE_FAILED }) as const);
-    if (result.ok) update([...(itemsRef.current ?? []), result.value]);
-    else setError(result.error);
-  }
-
-  async function copyAsText() {
-    const text = (view?.todo ?? [])
-      .map((e) => (e.kind === "divider" ? "" : `・${e.name}${e.quantityText ? ` ${e.quantityText}` : ""}`))
-      .join("\n");
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  }
-
-  const todoCount = view?.todo.filter((e) => e.kind === "row").length ?? 0;
-  // 絞り込み中は一部の行しか見えず、並べ替えると見えない行との順番がずれるので、すべて表示のときだけ動かせる
-  const reorderable = withinDays === undefined;
+  const hasDone = memoLines(text).some((l) => {
+    const line = parseMemoLine(l);
+    return line.kind === "check" && line.done;
+  });
 
   return (
     <>
-      <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
-        {FILTERS.map((f) => (
-          <button
-            key={f.label}
-            onClick={() => setWithinDays(f.withinDays)}
-            className={`pressable shrink-0 rounded-full border px-4 py-1.5 text-sm ${
-              withinDays === f.withinDays ? "border-accent bg-accent text-accent-foreground" : "border-border bg-surface"
-            }`}
-          >
-            {f.label}
-          </button>
-        ))}
+      <div className="flex items-center gap-2">
+        <div className="flex flex-1 rounded-full bg-border/60 p-1 text-sm">
+          {(
+            [
+              ["write", "✏️ 書く"],
+              ["shop", "🛒 買い物中"],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => changeMode(key)}
+              className={`pressable flex-1 rounded-full py-1.5 ${mode === key ? "bg-surface font-semibold shadow-sm" : "text-muted"}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <span className="w-16 shrink-0 text-right text-xs text-muted" aria-live="polite">
+          {status === "saving" ? "保存中…" : status === "merged" ? "まとめて保存" : base ? "保存済み ✓" : ""}
+        </span>
       </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button className={subtleButtonClass} onClick={() => setShowRanges(!showRanges)} disabled={!!reflecting}>
+          {reflecting ? (
+            <>
+              <Spinner /> {reflecting}の材料を反映中…
+            </>
+          ) : (
+            "🍳 献立の材料を反映"
+          )}
+        </button>
+        {mode === "shop" && (
+          <button className={subtleButtonClass} onClick={() => edit(removeDoneLines(text), 0)} disabled={!hasDone}>
+            ☑ を消す
+          </button>
+        )}
+      </div>
+      {showRanges && (
+        <div className="mt-2 rounded-2xl border border-border bg-surface p-3">
+          <p className="mb-2 text-xs text-muted">
+            選んだ期間の献立のうち、まだ反映していない品の材料を、作る人数に合わせてメモの末尾に足します
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {RANGES.map((r) => (
+              <button key={r.label} className={subtleButtonClass} onClick={() => void reflect(r)}>
+                {r.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {error && <p className="mt-3 rounded-xl bg-accent-soft px-4 py-3 text-sm">{error}</p>}
 
-      {view === null && error ? null : view === null ? (
+      {base === null && !error ? (
         <ShoppingRowsSkeleton />
+      ) : mode === "write" ? (
+        <MemoEditor text={text} onChange={(t) => edit(t)} onBlur={() => void save()} />
       ) : (
-        <>
-          <div className="mt-4 mb-2 flex items-center justify-between">
-            <h2 className="text-lg font-bold">
-              買う物 <span className="text-sm font-normal text-muted">{todoCount}品</span>
-            </h2>
-            <div className="flex gap-2">
-              <button className={subtleButtonClass} onClick={addDivider}>
-                ＋ 区切り
-              </button>
-              <button className={subtleButtonClass} onClick={copyAsText} disabled={todoCount === 0}>
-                {copied ? "コピー済 ✓" : "コピー"}
-              </button>
-            </div>
-          </div>
-          <p className="mb-2 text-xs text-muted">
-            行をタップして直し、Enter ですぐ下に書き足せます。
-            {reorderable ? "右の ≡ を押したまま動かすと並べ替え" : "並べ替えは「すべて」のときにできます"}
-          </p>
-
-          <EntryList
-            entries={view.todo}
-            today={today}
-            reorderable={reorderable}
-            draft={{ afterId: draftAfter, onWrite: write, onReset: () => setDraftAfter(null) }}
-            draftInputRef={draftRef}
-            onToggle={toggle}
-            onRemove={remove}
-            onEdit={edit}
-            onOpenDraftAfter={openDraftAfter}
-            onWriteAfter={write}
-            onMove={move}
-          />
-          {todoCount === 0 && view.bought.length > 0 && (
-            <p className="py-3 text-center text-sm text-muted">全部買いました</p>
-          )}
-
-          {view.bought.length > 0 && (
-            <>
-              <h2 className="mt-6 mb-2 text-sm font-bold text-muted">買った物（明日になると消えます）</h2>
-              <EntryList
-                entries={view.bought}
-                today={today}
-                reorderable={false}
-                onToggle={toggle}
-                onRemove={remove}
-                onEdit={edit}
-                onOpenDraftAfter={openDraftAfter}
-                onWriteAfter={write}
-                onMove={move}
-              />
-            </>
-          )}
-        </>
+        <ShoppingView text={text} onToggle={(i) => edit(toggleLine(text, i), 300)} />
       )}
     </>
   );
 }
 
-function neededOnLabel(neededOn: CalendarDate | null, today: CalendarDate): string | null {
-  if (!neededOn) return null;
-  if (neededOn === today) return "今日使う";
-  if (neededOn === addDays(today, 1)) return "明日使う";
-  if (compareDates(neededOn, today) < 0) return `${formatShort(neededOn)}に使う予定でした`;
-  return `${formatShort(neededOn)}に使う`;
-}
-
-type DraftProps = {
-  afterId: ShoppingItemId | null;
-  onWrite: (text: string, afterId: ShoppingItemId | null) => void;
-  onReset: () => void;
-};
-
-/** 買う物と区切りの一覧。reorderable なら ≡ を押したまま上下に動かせる。draft があれば書き足す行を出す */
-function EntryList({
-  entries,
-  today,
-  reorderable,
-  draft,
-  draftInputRef,
-  onToggle,
-  onRemove,
-  onEdit,
-  onOpenDraftAfter,
-  onWriteAfter,
-  onMove,
-}: {
-  entries: readonly Entry[];
-  today: CalendarDate;
-  reorderable: boolean;
-  draft?: DraftProps;
-  draftInputRef?: React.Ref<HTMLTextAreaElement>;
-  onToggle: (row: ShoppingRow) => void;
-  onRemove: (ids: readonly ShoppingItemId[]) => void;
-  onEdit: (row: ShoppingRow, text: string) => void;
-  onOpenDraftAfter: (id: ShoppingItemId) => void;
-  onWriteAfter: (text: string, afterId: ShoppingItemId | null) => void;
-  onMove: (ids: readonly ShoppingItemId[], beforeId: ShoppingItemId | null) => void;
-}) {
-  const refs = useRef(new Map<string, HTMLLIElement>());
-  const [drag, setDrag] = useState<{ key: string; startY: number; dy: number; beforeKey: string | null } | null>(null);
-
-  /** 指の位置から、どの行の手前に入るかを決める（null なら一番下） */
-  function beforeKeyAt(clientY: number, draggingKey: string): string | null {
-    for (const e of entries) {
-      if (e.key === draggingKey) continue;
-      const rect = refs.current.get(e.key)?.getBoundingClientRect();
-      if (rect && clientY < rect.top + rect.height / 2) return e.key;
-    }
-    return null;
-  }
-
-  function onPointerDown(e: React.PointerEvent, key: string) {
-    e.currentTarget.setPointerCapture(e.pointerId);
-    setDrag({ key, startY: e.clientY, dy: 0, beforeKey: beforeKeyAt(e.clientY, key) });
-  }
-
-  function onPointerMove(e: React.PointerEvent) {
-    if (!drag) return;
-    setDrag({ ...drag, dy: e.clientY - drag.startY, beforeKey: beforeKeyAt(e.clientY, drag.key) });
-  }
-
-  function onPointerUp() {
-    if (!drag) return;
-    const moving = entries.find((e) => e.key === drag.key)!;
-    const before = drag.beforeKey ? entries.find((e) => e.key === drag.beforeKey)! : null;
-    const index = entries.indexOf(moving);
-    // 同じ場所に置いたときは何もしない
-    const unchanged = before ? entries[index + 1] === before : index === entries.length - 1;
-    setDrag(null);
-    if (!unchanged) onMove(idsOf(moving), before ? anchorOf(before) : null);
-  }
-
-  // 書き足す行を差し込む場所（見えている行になければ末尾）
-  const draftIndex = draft?.afterId ? entries.findIndex((e) => contains(e, draft.afterId!)) : -1;
-  const items: ({ kind: "entry"; entry: Entry } | { kind: "draft" })[] = entries.map((entry) => ({
-    kind: "entry",
-    entry,
-  }));
-  if (draft) items.splice(draftIndex >= 0 ? draftIndex + 1 : items.length, 0, { kind: "draft" });
-
-  return (
-    <ul className="rounded-2xl border border-border bg-surface">
-      {items.map((item, i) => {
-        const border = i > 0 ? "border-t" : "";
-        if (item.kind === "draft") {
-          // 同じ key のまま場所だけ動かすので、入力欄が作り直されず、キーボードも閉じない
-          return (
-            <li key="draft" className={`flex items-center border-border ${border}`}>
-              <DraftRow
-                draft={draft!}
-                inputRef={draftInputRef}
-                afterId={draftIndex >= 0 ? anchorOfDraftTarget(entries, draft!.afterId!) : null}
-              />
-            </li>
-          );
-        }
-        const entry = item.entry;
-        const dragging = drag?.key === entry.key;
-        const dropHere = drag && !dragging && drag.beforeKey === entry.key;
-        const dropAtEnd = drag && drag.beforeKey === null && entry === entries.at(-1);
-        return (
-          <li
-            key={entry.key}
-            ref={(el) => {
-              if (el) refs.current.set(entry.key, el);
-              else refs.current.delete(entry.key);
-            }}
-            style={dragging ? { transform: `translateY(${drag.dy}px)` } : undefined}
-            className={`relative flex items-center border-border ${border} ${
-              dragging ? "z-10 rounded-xl bg-surface shadow-lg" : ""
-            } ${dropHere ? "before:absolute before:inset-x-3 before:-top-px before:h-0.5 before:bg-accent" : ""} ${
-              dropAtEnd ? "after:absolute after:inset-x-3 after:-bottom-px after:h-0.5 after:bg-accent" : ""
-            }`}
-          >
-            {entry.kind === "divider" ? (
-              <div className="flex min-h-9 flex-1 items-center pl-4">
-                <div className="h-px flex-1 bg-muted/40" />
-                <button
-                  onClick={() => onRemove([entry.id])}
-                  aria-label="区切りを消す"
-                  className="pressable px-3 text-muted"
-                >
-                  ×
-                </button>
-              </div>
-            ) : (
-              <RowContent
-                row={entry}
-                today={today}
-                onToggle={onToggle}
-                onRemove={onRemove}
-                onEdit={onEdit}
-                onOpenDraftAfter={onOpenDraftAfter}
-                onWriteAfter={onWriteAfter}
-              />
-            )}
-            {reorderable && (
-              <span
-                onPointerDown={(e) => onPointerDown(e, entry.key)}
-                onPointerMove={onPointerMove}
-                onPointerUp={onPointerUp}
-                onPointerCancel={() => setDrag(null)}
-                aria-label="押したまま上下に動かす"
-                className="-ml-2 flex cursor-grab touch-none items-center self-stretch pr-4 pl-1 text-xl text-muted/70 select-none"
-              >
-                ≡
-              </span>
-            )}
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-/** 書き足す行の下に入れるときの目印（その行の一番上にある買う物、または区切り） */
-function anchorOfDraftTarget(entries: readonly Entry[], id: ShoppingItemId): ShoppingItemId {
-  const entry = entries.find((e) => contains(e, id));
-  return entry ? anchorOf(entry) : id;
-}
-
 /**
- * 書き足す行。タップして書き、Enter ですぐ下に次の行が出る（キーボードは閉じない）。
- * 何行も貼り付けたら、1 行ずつ買う物になり、空行は区切りになる。
- * 1 行用の入力欄（input）は貼り付けた改行を消してしまうので、textarea を 1 行の見た目で使う。
+ * 書く: 普通のメモ帳。☐ の行で Enter を押すと次の行にも ☐ が付き、空の ☐ 行で Enter を押すと ☐ が外れる。
  */
-function DraftRow({
-  draft,
-  inputRef,
-  afterId,
-}: {
-  draft: DraftProps;
-  inputRef?: React.Ref<HTMLTextAreaElement>;
-  afterId: ShoppingItemId | null;
-}) {
-  const [text, setText] = useState("");
+function MemoEditor({ text, onChange, onBlur }: { text: string; onChange: (text: string) => void; onBlur: () => void }) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const caret = useRef<number | null>(null);
 
-  function commit(value: string) {
-    setText("");
-    if (value.trim()) draft.onWrite(value, afterId);
+  // 書いた量に合わせて高さを伸ばし、☐ を足したときのカーソルの位置を戻す
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.max(el.scrollHeight, 240)}px`;
+    if (caret.current !== null) {
+      el.setSelectionRange(caret.current, caret.current);
+      caret.current = null;
+    }
+  }, [text]);
+
+  /** カーソルのある行の範囲 */
+  function currentLine(el: HTMLTextAreaElement) {
+    const start = el.value.lastIndexOf("\n", el.selectionStart - 1) + 1;
+    const endIndex = el.value.indexOf("\n", el.selectionStart);
+    const end = endIndex < 0 ? el.value.length : endIndex;
+    return { start, end, line: el.value.slice(start, end) };
+  }
+
+  function replace(el: HTMLTextAreaElement, start: number, end: number, insert: string, nextCaret: number) {
+    caret.current = nextCaret;
+    onChange(el.value.slice(0, start) + insert + el.value.slice(end));
+  }
+
+  /** カーソルのある行に ☐ を付ける・外す */
+  function toggleBox() {
+    const el = ref.current;
+    if (!el) return;
+    const { start, end, line } = currentLine(el);
+    const parsed = parseMemoLine(line);
+    const next = parsed.kind === "check" ? parsed.text : `${OPEN_BOX} ${line}`;
+    replace(el, start, end, next, start + next.length);
+    el.focus();
   }
 
   return (
-    <div className="flex min-w-0 flex-1 items-center">
-      <span className="flex w-12 shrink-0 justify-center text-lg text-muted">＋</span>
+    <div className="mt-3 rounded-2xl border border-border bg-surface">
+      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+        <button
+          type="button"
+          // ボタンを押してもカーソルが入力欄から外れないようにする
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={toggleBox}
+          className="pressable shrink-0 rounded-lg border border-border px-3 py-1 text-sm whitespace-nowrap"
+        >
+          {OPEN_BOX} チェック
+        </button>
+        <span className="text-xs text-muted">{OPEN_BOX} を付けた行は「買い物中」でチェックできます</span>
+      </div>
       <textarea
-        ref={inputRef}
-        rows={1}
+        ref={ref}
         value={text}
-        placeholder="書き足す（例: 牛乳 2本）"
-        aria-label="買う物を書き足す"
-        className="min-w-0 flex-1 resize-none bg-transparent py-3 pr-4 leading-6 outline-none placeholder:text-muted"
-        onChange={(e) => {
-          // 貼り付けなどで改行が入ったら（Android の Enter も）、そのまま書き足す
-          if (LINE_BREAK.test(e.target.value)) commit(e.target.value);
-          else setText(e.target.value);
-        }}
-        onPaste={(e) => {
-          const pasted = e.clipboardData.getData("text");
-          if (!LINE_BREAK.test(pasted)) return;
-          e.preventDefault();
-          commit(text ? `${text}\n${pasted}` : pasted);
-        }}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
         onKeyDown={(e) => {
-          // 変換中の Enter（日本語入力の確定）では書き足さない
-          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-            e.preventDefault();
-            commit(text);
+          if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
+          const el = e.currentTarget;
+          if (el.selectionStart !== el.selectionEnd) return;
+          const { start, end, line } = currentLine(el);
+          const parsed = parseMemoLine(line);
+          if (parsed.kind !== "check") return;
+          e.preventDefault();
+          if (!parsed.text.trim()) {
+            // 中身のない ☐ 行で Enter を押したら、☐ を外してチェックリストを終える
+            replace(el, start, end, "", start);
+          } else {
+            const insert = `\n${OPEN_BOX} `;
+            replace(el, el.selectionStart, el.selectionStart, insert, el.selectionStart + insert.length);
           }
-          // 何も書いていない行で Backspace を押したら、末尾に戻す
-          if (e.key === "Backspace" && !text) draft.onReset();
         }}
-        onBlur={() => {
-          // 書きかけのまま離れたら書き足す。何も書いていなければ末尾に戻す
-          if (text.trim()) commit(text);
-          else draft.onReset();
-        }}
-        enterKeyHint="enter"
-        autoComplete="off"
+        placeholder={`思いついた物を自由に書く\n例:\n🛒 スーパー\n${OPEN_BOX} 牛乳 2本\n${OPEN_BOX} 卵\n\n💊 ドラッグストア\n${OPEN_BOX} 靴洗剤`}
+        aria-label="買い物メモ"
+        className="block min-h-60 w-full resize-none rounded-b-2xl bg-transparent px-4 py-3 leading-7 outline-none placeholder:text-muted"
       />
     </div>
   );
 }
 
-function RowContent({
-  row,
-  today,
-  onToggle,
-  onRemove,
-  onEdit,
-  onOpenDraftAfter,
-  onWriteAfter,
-}: {
-  row: ShoppingRow;
-  today: CalendarDate;
-  onToggle: (row: ShoppingRow) => void;
-  onRemove: (ids: readonly ShoppingItemId[]) => void;
-  onEdit: (row: ShoppingRow, text: string) => void;
-  onOpenDraftAfter: (id: ShoppingItemId) => void;
-  onWriteAfter: (text: string, afterId: ShoppingItemId | null) => void;
-}) {
-  const [editing, setEditing] = useState<string | null>(null);
-  const when = neededOnLabel(row.neededOn, today);
-  const note = [when, row.recipeTitles.join("・")].filter(Boolean).join("　");
-
-  function finishEditing() {
-    if (editing !== null) onEdit(row, editing);
-    setEditing(null);
+/** 買い物中: キーボードを出さずに、行をタップして ☐ ↔ ☑ を切り替える */
+function ShoppingView({ text, onToggle }: { text: string; onToggle: (index: number) => void }) {
+  const lines = memoLines(text);
+  if (!text.trim()) {
+    return <p className="mt-10 text-center text-sm text-muted">メモは空です。「書く」で書き足してください</p>;
   }
-
-  function onTap() {
-    if (row.bought) return;
-    // まとめた行（献立の材料が合算されている等）は直せないので、すぐ下に書き足す
-    if (row.editable) setEditing(row.editText);
-    else onOpenDraftAfter(row.anchorId);
-  }
-
   return (
-    <div className="flex min-w-0 flex-1 items-start">
-      <label className="pressable flex shrink-0 cursor-pointer py-3 pr-3 pl-4">
-        <input
-          type="checkbox"
-          checked={row.bought}
-          onChange={() => onToggle(row)}
-          aria-label={`${row.name}を買った`}
-          className="mt-1 h-5 w-5 accent-[var(--accent)]"
-        />
-      </label>
-
-      {editing !== null ? (
-        <textarea
-          autoFocus
-          rows={1}
-          value={editing}
-          onChange={(e) => {
-            // 直している最中に改行が入ったら（Android の Enter など）、ここで確定してすぐ下に書き足す行へ
-            if (LINE_BREAK.test(e.target.value)) {
-              const [first, ...rest] = e.target.value.split(LINE_BREAK);
-              setEditing(first);
-              if (rest.join("").trim()) onWriteAfter(rest.join("\n"), row.anchorId);
-              else onOpenDraftAfter(row.anchorId);
-            } else {
-              setEditing(e.target.value);
-            }
-          }}
-          onBlur={finishEditing}
-          onPaste={(e) => {
-            const pasted = e.clipboardData.getData("text");
-            if (!LINE_BREAK.test(pasted)) return;
-            // 何行も貼り付けたら、この行の下にまとめて書き足す
-            e.preventDefault();
-            onWriteAfter(pasted, row.anchorId);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              // 書き足す行へ移ると、この欄が離れて（blur）直した内容が保存される
-              onOpenDraftAfter(row.anchorId);
-            }
-            if (e.key === "Escape") setEditing(null);
-          }}
-          enterKeyHint="enter"
-          className="my-1.5 min-w-0 flex-1 resize-none rounded-lg border border-accent bg-surface px-2 py-1.5 leading-6 outline-none"
-        />
-      ) : (
-        <button
-          type="button"
-          onClick={onTap}
-          className={`min-w-0 flex-1 py-3 text-left ${row.bought ? "text-muted line-through" : ""}`}
-        >
-          <span className="flex justify-between gap-3">
-            <span className="font-medium break-all">{row.name}</span>
-            <span className="shrink-0">{row.quantityText}</span>
-          </span>
-          {note && <span className="block truncate text-xs text-muted">{note}</span>}
-        </button>
-      )}
-
-      {editing === null && (
-        <button
-          onClick={() => onRemove(row.itemIds)}
-          aria-label={`${row.name}をリストから消す`}
-          className="pressable shrink-0 px-3 py-3 text-lg text-muted"
-        >
-          ×
-        </button>
-      )}
-    </div>
+    <ul className="mt-3 rounded-2xl border border-border bg-surface py-1">
+      {lines.map((raw, i) => {
+        const line = parseMemoLine(raw);
+        if (line.kind === "text") {
+          return raw.trim() ? (
+            <li key={i} className="px-4 pt-3 pb-1 text-sm font-bold text-muted break-all">
+              {line.text}
+            </li>
+          ) : (
+            <li key={i} className="h-3" aria-hidden />
+          );
+        }
+        return (
+          <li key={i}>
+            <button
+              onClick={() => onToggle(i)}
+              className="pressable flex w-full items-start gap-3 px-4 py-2.5 text-left"
+              aria-pressed={line.done}
+            >
+              <span className={`text-xl leading-6 ${line.done ? "text-accent" : "text-muted"}`}>
+                {line.done ? DONE_BOX : OPEN_BOX}
+              </span>
+              <span className={`flex-1 leading-6 break-all ${line.done ? "text-muted line-through" : ""}`}>
+                {line.text}
+              </span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
   );
 }

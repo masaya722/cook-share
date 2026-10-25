@@ -3,15 +3,9 @@ import type { Store } from "@/application/store";
 import { type DishId, type DishInMeal, Meal, type MealTime } from "@/domain/menu/meal";
 import type { Recipe, RecipeId } from "@/domain/recipe/recipe";
 import type { CalendarDate } from "@/domain/shared/calendar-date";
-import { ShoppingList } from "@/domain/shopping/shopping-list";
+import { ShoppingMemo } from "@/domain/shopping/shopping-memo";
 import type { RecipeRow } from "@/lib/types";
 import { toDomainRecipe, toRecipeRow } from "./recipe-mapper";
-import {
-  SHOPPING_ITEM_COLUMNS,
-  type ShoppingItemRow,
-  toShoppingEntry,
-  toShoppingItemRow,
-} from "./shopping-item-mapper";
 
 // meals と dishes は「食事の品」と「残り物（leftovers 経由）」の 2 通りでつながるので、使う外部キーを明示する。
 // leftovers 側はつながり方が 1 通りなので指定しない（「!leftovers_...」は PostgREST が「!left」結合と読んでしまう）
@@ -104,12 +98,13 @@ export class SupabaseStore implements Store {
     return this.loadMealsByIds((rows ?? []).map((r) => r.meal_id));
   }
 
-  async loadDishesFrom(date: CalendarDate): Promise<DishInMeal[]> {
+  async loadDishesBetween(from: CalendarDate, to: CalendarDate): Promise<DishInMeal[]> {
     const rows = check(
       await this.db
         .from("dishes")
         .select("id, recipe_id, servings_to_cook, meal:meals!dishes_meal_id_fkey!inner(date, meal_time)")
-        .gte("meal.date", date),
+        .gte("meal.date", from)
+        .lte("meal.date", to),
     ) as unknown as { id: string; recipe_id: string; servings_to_cook: number; meal: { date: string; meal_time: MealTime } }[];
     return rows.map((r) => ({
       id: r.id as DishId,
@@ -120,19 +115,23 @@ export class SupabaseStore implements Store {
     }));
   }
 
-  async loadShoppingList() {
-    const rows = check(
-      await this.db
-        .from("shopping_items")
-        .select(SHOPPING_ITEM_COLUMNS)
-        .order("position"),
-    );
-    return ShoppingList.reconstitute((rows as unknown as ShoppingItemRow[]).map(toShoppingEntry));
+  async loadShoppingMemo() {
+    const row = check(
+      await this.db.from("shopping_memo").select("text, reflected_dish_ids, version").maybeSingle(),
+    ) as { text: string; reflected_dish_ids: string[]; version: number } | null;
+    if (!row) throw new Error("買い物メモがありません（0008 の SQL を実行してください）");
+    return ShoppingMemo.reconstitute({ text: row.text, reflectedDishIds: row.reflected_dish_ids, version: row.version });
   }
 
-  async isShoppingListBackfilled() {
-    const row = check(await this.db.from("household_settings").select("shopping_backfilled_at").maybeSingle());
-    return Boolean(row?.shopping_backfilled_at);
+  async saveShoppingMemo(memo: ShoppingMemo, expectedVersion: number) {
+    const saved = check(
+      await this.db.rpc("save_shopping_memo", {
+        new_text: memo.text,
+        new_reflected: memo.reflectedDishIds,
+        expected_version: expectedVersion,
+      }),
+    ) as number | null;
+    return saved ?? null;
   }
 
   async save(changes: Parameters<Store["save"]>[0]) {
@@ -152,9 +151,6 @@ export class SupabaseStore implements Store {
             })),
           meals_delete: meals.filter((m) => m.isEmpty).map((m) => m.id),
           recipes_delete: changes.recipesDelete ?? [],
-          items_upsert: (changes.shopping?.upserted ?? []).map(toShoppingItemRow),
-          items_delete: changes.shopping?.removedIds ?? [],
-          mark_backfilled: changes.markBackfilled ?? false,
         },
       }),
     );

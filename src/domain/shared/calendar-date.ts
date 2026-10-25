@@ -45,3 +45,11 @@ export function compareDates(a: CalendarDate, b: CalendarDate): number {
 export function weekday(value: CalendarDate): number {
   return toLocalDate(value).getDay();
 }
+
+const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
+
+/** 例: 10/26(月) */
+export function dateLabel(value: CalendarDate): string {
+  const [, m, d] = value.split("-").map(Number);
+  return `${m}/${d}(${WEEKDAYS[weekday(value)]})`;
+}

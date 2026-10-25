@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { Quantity } from "@/domain/recipe/quantity";
 import { Ingredient } from "@/domain/recipe/ingredient";
 import { Recipe } from "@/domain/recipe/recipe";
 import { Servings } from "@/domain/recipe/servings";
@@ -10,20 +9,19 @@ import {
   cancelEatingOut,
   changeServings,
   deleteRecipe,
-  markBought,
   markEatingOut,
-  openShoppingList,
+  openShoppingMemo,
   planDish,
+  reflectMenuIngredients,
   removeDish,
   removeLeftover,
-  removeShoppingItems,
   saveRecipe,
+  saveShoppingMemoText,
   upcomingUsesOfRecipe,
-  writeShopping,
 } from "./use-cases";
 
-const today = calendarDate("2026-10-08");
-const tomorrow = calendarDate("2026-10-09");
+const today = calendarDate("2026-10-26");
+const tomorrow = calendarDate("2026-10-27");
 
 let store: InMemoryStore;
 let seq: number;
@@ -32,7 +30,6 @@ const newId = () => `id-${++seq}`;
 beforeEach(() => {
   seq = 0;
   store = new InMemoryStore();
-  store.backfilled = true;
   store.recipes.set(
     "curry",
     Recipe.create({
@@ -44,25 +41,16 @@ beforeEach(() => {
   );
 });
 
-async function shopping() {
-  const items = await openShoppingList(store, today);
-  return Object.fromEntries(
-    items.flatMap((i) => (i.kind === "item" ? [[i.name.text, Quantity.format(i.quantity)]] : [])),
-  );
-}
-
 async function planCurry(date = today, servingsToCook?: number) {
   await planDish(store, { date, mealTime: "dinner", recipeId: "curry", servingsToCook }, newId);
   return store.allDishes().at(-1)!.id;
 }
 
 describe("品を献立に入れる・外す", () => {
-  it("品を加えると材料が入り、外すと消える。空になった食事は残らない", async () => {
+  it("品を加えて外すと、空になった食事は残らない", async () => {
     const dishId = await planCurry();
-    expect(await shopping()).toEqual({ 豚ばら肉: "200g", 玉ねぎ: "1個" });
-
+    expect(store.meals.size).toBe(1);
     await removeDish(store, dishId);
-    expect(await shopping()).toEqual({});
     expect(store.meals.size).toBe(0);
   });
 
@@ -73,25 +61,21 @@ describe("品を献立に入れる・外す", () => {
     expect(store.allDishes()).toHaveLength(2);
   });
 
-  it("作る人数を指定して入れると、その人数分の材料が入る", async () => {
-    await planCurry(today, 4);
-    expect(await shopping()).toEqual({ 豚ばら肉: "400g", 玉ねぎ: "2個" });
-  });
-
   it("存在しないレシピは献立に入れられない", async () => {
     await expect(
       planDish(store, { date: today, mealTime: "dinner", recipeId: "nope" }, newId),
     ).rejects.toThrow("レシピが見つかりません");
   });
+
+  it("献立を変えても、買い物メモは自動では変わらない", async () => {
+    store.memo.text = "☐ 牛乳";
+    const dishId = await planCurry();
+    await removeDish(store, dishId);
+    expect((await openShoppingMemo(store)).text).toBe("☐ 牛乳");
+  });
 });
 
 describe("作る人数を変える", () => {
-  it("買い物リストの分量も変わる", async () => {
-    const dishId = await planCurry();
-    await changeServings(store, dishId, 4);
-    expect(await shopping()).toEqual({ 豚ばら肉: "400g", 玉ねぎ: "2個" });
-  });
-
   it("残り物にしている品は、2 人分以下に減らせない", async () => {
     const dishId = await planCurry(today, 4);
     await addLeftover(store, { date: tomorrow, mealTime: "dinner", sourceDishId: dishId }, newId);
@@ -101,11 +85,10 @@ describe("作る人数を変える", () => {
 });
 
 describe("外食", () => {
-  it("外食にすると品が外れて材料が消え、やめると食事ごと消える", async () => {
+  it("外食にすると品が外れ、やめると食事ごと消える", async () => {
     await planCurry();
     await markEatingOut(store, { date: today, mealTime: "dinner" }, newId);
     expect(store.allDishes()).toHaveLength(0);
-    expect(await shopping()).toEqual({});
     expect([...store.meals.values()][0].eatingOut).toBe(true);
 
     await cancelEatingOut(store, { date: today, mealTime: "dinner" });
@@ -119,11 +102,9 @@ describe("外食", () => {
 });
 
 describe("残り物", () => {
-  it("多めに作った品を翌日の献立に入れても、買い物は増えない", async () => {
+  it("多めに作った品を翌日の献立に入れられる", async () => {
     const dishId = await planCurry(today, 4);
-    const before = await shopping();
     await addLeftover(store, { date: tomorrow, mealTime: "dinner", sourceDishId: dishId }, newId);
-    expect(await shopping()).toEqual(before);
     const next = [...store.meals.values()].find((m) => m.date === tomorrow)!;
     expect(next.leftovers).toEqual([{ sourceDishId: dishId, recipeId: "curry" }]);
   });
@@ -143,54 +124,21 @@ describe("残り物", () => {
   });
 });
 
-describe("レシピの削除", () => {
+describe("レシピ", () => {
   it("今日以降の献立で使っている日が分かる", async () => {
-    await planCurry(calendarDate("2026-10-07"));
+    await planCurry(calendarDate("2026-10-25"));
     await planCurry(tomorrow);
     expect(await upcomingUsesOfRecipe(store, "curry", today)).toEqual([{ date: tomorrow, mealTime: "dinner" }]);
   });
 
-  it("削除すると、献立からも買い物リストからも消える。手で足した物は残る", async () => {
+  it("削除すると、献立からも消える", async () => {
     const dishId = await planCurry(today, 4);
     await addLeftover(store, { date: tomorrow, mealTime: "dinner", sourceDishId: dishId }, newId);
-    await writeShopping(store, "牛乳");
-
     await deleteRecipe(store, "curry");
     expect(store.meals.size).toBe(0);
     expect(store.recipes.has("curry")).toBe(false);
-    expect(Object.keys(await shopping())).toEqual(["牛乳"]);
-  });
-});
-
-describe("買い物リストを開く", () => {
-  it("初回だけ、今日以降の献立の材料を作る人数に合わせて入れる", async () => {
-    await planCurry(calendarDate("2026-10-07"));
-    await planCurry(tomorrow, 4);
-    store.items.clear();
-    store.backfilled = false;
-
-    expect(await shopping()).toEqual({ 豚ばら肉: "400g", 玉ねぎ: "2個" });
-    expect(store.backfilled).toBe(true);
-
-    // 2 回目は入れ直さない（手で消した物が復活しない）
-    await removeShoppingItems(store, [...store.items.keys()]);
-    expect(await shopping()).toEqual({});
   });
 
-  it("前日までに買った物は消える", async () => {
-    const [milk] = await writeShopping(store, "牛乳");
-    await markBought(store, [milk.id], calendarDate("2026-10-07"));
-    expect(await shopping()).toEqual({});
-  });
-
-  it("相手がもう消した買う物にチェックしても、エラーにならない", async () => {
-    const [milk] = await writeShopping(store, "牛乳");
-    await removeShoppingItems(store, [milk.id]);
-    await expect(markBought(store, [milk.id], today)).resolves.toBeUndefined();
-  });
-});
-
-describe("レシピの保存", () => {
   it("新しいレシピを保存すると、献立に入れられる", async () => {
     await saveRecipe(
       store,
@@ -198,7 +146,7 @@ describe("レシピの保存", () => {
       "insert",
     );
     await planDish(store, { date: today, mealTime: "lunch", recipeId: "pasta" }, newId);
-    expect((await shopping())["パスタ"]).toBe("200g");
+    expect(store.allDishes()).toHaveLength(1);
   });
 
   it("ないレシピは上書きできない", async () => {
@@ -207,22 +155,68 @@ describe("レシピの保存", () => {
   });
 });
 
-describe("メモ帳のように書く", () => {
-  it("何行もまとめて書ける。空行は区切りになる", async () => {
-    await writeShopping(store, "牛乳 2本\n\n靴洗剤");
-    expect(await shopping()).toEqual({ 牛乳: "2本", 靴洗剤: "" });
-    expect([...store.items.values()].map((e) => e.kind)).toEqual(["item", "divider", "item"]);
+describe("買い物メモを保存する", () => {
+  it("相手が保存していなければ、そのまま保存する", async () => {
+    const opened = await openShoppingMemo(store);
+    const { memo, merged } = await saveShoppingMemoText(store, {
+      baseText: opened.text,
+      baseVersion: opened.version,
+      text: "☐ 牛乳\n安ければ2本",
+    });
+    expect(merged).toBe(false);
+    expect(memo.text).toBe("☐ 牛乳\n安ければ2本");
+    expect(memo.version).toBe(opened.version + 1);
   });
 
-  it("指定した行のすぐ下に入る。その行がもう消えていたら末尾に入る", async () => {
-    const [beef] = await writeShopping(store, "牛肉\n卵");
-    await writeShopping(store, "鶏もも肉", { afterId: beef.id });
-    await writeShopping(store, "筆箱", { afterId: "gone" });
-    const list = await store.loadShoppingList();
-    expect(list.items().map((i) => i.name.text)).toEqual(["牛肉", "鶏もも肉", "卵", "筆箱"]);
+  it("相手が先に保存していたら、行単位でまとめて保存する（どちらの行も残る）", async () => {
+    store.memo.text = "☐ 牛肉";
+    const wife = await openShoppingMemo(store);
+    const husband = await openShoppingMemo(store);
+
+    await saveShoppingMemoText(store, { baseText: husband.text, baseVersion: husband.version, text: "☐ 牛肉\n☐ 靴洗剤" });
+    const { memo, merged } = await saveShoppingMemoText(store, {
+      baseText: wife.text,
+      baseVersion: wife.version,
+      text: "☐ 牛肉\n☐ 卵",
+    });
+    expect(merged).toBe(true);
+    expect(memo.text.split("\n").sort()).toEqual(["☐ 卵", "☐ 牛肉", "☐ 靴洗剤"].sort());
+  });
+});
+
+describe("献立の材料を反映する", () => {
+  it("期間内の献立の材料を、作る人数に合わせてメモの末尾に足す", async () => {
+    store.memo.text = "☐ 牛乳";
+    await planCurry(today, 4);
+    await planCurry(calendarDate("2026-11-05"));
+    const memo = await reflectMenuIngredients(store, { from: today, to: tomorrow });
+    expect(memo.text).toBe("☐ 牛乳\n\n【10/26(月)〜10/27(火)の献立の材料】\n☐ 豚ばら肉 400g\n☐ 玉ねぎ 2個");
   });
 
-  it("何も書いていなければ足さない", async () => {
-    await expect(writeShopping(store, "  \n ")).rejects.toThrow("品名を入力してください");
+  it("2 回押しても二重に入らず、新しく足した献立の分だけ入る", async () => {
+    await planCurry(today);
+    await reflectMenuIngredients(store, { from: today, to: tomorrow });
+    await expect(reflectMenuIngredients(store, { from: today, to: tomorrow })).rejects.toThrow(
+      "まだ反映していない献立はありません",
+    );
+    await planCurry(tomorrow);
+    const memo = await reflectMenuIngredients(store, { from: today, to: tomorrow });
+    expect(memo.text.match(/【/g)).toHaveLength(2);
+  });
+
+  it("反映の途中で相手がメモを保存しても、相手の行は消えない", async () => {
+    await planCurry(today);
+    const original = store.saveShoppingMemo.bind(store);
+    let first = true;
+    store.saveShoppingMemo = async (memo, expected) => {
+      if (first) {
+        // 反映を保存する直前に、相手が保存した
+        first = false;
+        store.memo = { ...store.memo, text: "☐ 筆箱", version: store.memo.version + 1 };
+      }
+      return original(memo, expected);
+    };
+    const memo = await reflectMenuIngredients(store, { from: today, to: today });
+    expect(memo.text.startsWith("☐ 筆箱\n\n【")).toBe(true);
   });
 });

@@ -1,7 +1,7 @@
 import { type DishInMeal, Meal, type MealTime } from "@/domain/menu/meal";
 import type { Recipe } from "@/domain/recipe/recipe";
 import { type CalendarDate, compareDates } from "@/domain/shared/calendar-date";
-import { type ShoppingEntry, ShoppingList } from "@/domain/shopping/shopping-list";
+import { ShoppingMemo } from "@/domain/shopping/shopping-memo";
 import type { Store } from "./store";
 
 type MealSnapshot = {
@@ -17,9 +17,7 @@ type MealSnapshot = {
 export class InMemoryStore implements Store {
   recipes = new Map<string, Recipe>();
   meals = new Map<string, MealSnapshot>();
-  items = new Map<string, ShoppingEntry>();
-  backfilled = false;
-  private seq = 0;
+  memo = { text: "", reflectedDishIds: [] as string[], version: 1 };
 
   private load(snapshot: MealSnapshot) {
     return Meal.reconstitute(structuredClone(snapshot));
@@ -48,16 +46,19 @@ export class InMemoryStore implements Store {
       .filter((m) => m.leftovers.some((l) => dishIds.includes(l.sourceDishId)))
       .map((s) => this.load(s));
   }
-  async loadDishesFrom(date: CalendarDate): Promise<DishInMeal[]> {
+  async loadDishesBetween(from: CalendarDate, to: CalendarDate): Promise<DishInMeal[]> {
     return [...this.meals.values()]
-      .filter((m) => compareDates(m.date, date) >= 0)
+      .filter((m) => compareDates(m.date, from) >= 0 && compareDates(m.date, to) <= 0)
       .flatMap((m) => m.dishes.map((d) => ({ ...d, date: m.date, mealTime: m.mealTime })));
   }
-  async loadShoppingList() {
-    return ShoppingList.reconstitute([...this.items.values()], () => `item-${++this.seq}`);
+
+  async loadShoppingMemo() {
+    return ShoppingMemo.reconstitute(this.memo);
   }
-  async isShoppingListBackfilled() {
-    return this.backfilled;
+  async saveShoppingMemo(memo: ShoppingMemo, expectedVersion: number) {
+    if (this.memo.version !== expectedVersion) return null;
+    this.memo = { text: memo.text, reflectedDishIds: memo.reflectedDishIds, version: expectedVersion + 1 };
+    return this.memo.version;
   }
 
   /** 献立の品をすべて並べる（テストの確認用） */
@@ -79,8 +80,5 @@ export class InMemoryStore implements Store {
         });
     }
     for (const id of changes.recipesDelete ?? []) this.recipes.delete(id);
-    for (const item of changes.shopping?.upserted ?? []) this.items.set(item.id, item);
-    for (const id of changes.shopping?.removedIds ?? []) this.items.delete(id);
-    if (changes.markBackfilled) this.backfilled = true;
   }
 }

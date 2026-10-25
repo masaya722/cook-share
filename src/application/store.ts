@@ -1,7 +1,7 @@
 import type { DishInMeal, Meal, MealTime } from "@/domain/menu/meal";
 import type { Recipe } from "@/domain/recipe/recipe";
 import type { CalendarDate } from "@/domain/shared/calendar-date";
-import type { ShoppingList, ShoppingListChanges } from "@/domain/shopping/shopping-list";
+import type { ShoppingMemo } from "@/domain/shopping/shopping-memo";
 
 /** アプリケーション層が使う保存先。本番は Supabase、テストはメモリ上の実装 */
 export interface Store {
@@ -14,19 +14,16 @@ export interface Store {
   loadMealsWithDishesOfRecipe(recipeId: string): Promise<Meal[]>;
   /** 指定した品を残り物として並べている食事 */
   loadMealsWithLeftoversOf(dishIds: readonly string[]): Promise<Meal[]>;
-  loadDishesFrom(date: CalendarDate): Promise<DishInMeal[]>;
+  /** from〜to（両端を含む）の献立の品 */
+  loadDishesBetween(from: CalendarDate, to: CalendarDate): Promise<DishInMeal[]>;
 
-  loadShoppingList(): Promise<ShoppingList>;
-  isShoppingListBackfilled(): Promise<boolean>;
-
+  loadShoppingMemo(): Promise<ShoppingMemo>;
   /**
-   * 食事と買い物リストの変更を 1 つのトランザクションで保存する。
-   * meals は食事の全体を保存し、空になった食事（品も残り物もなく外食でもない）は消す。
+   * 買い物メモを保存する。保存されているメモの番号が expectedVersion のときだけ保存し、新しい番号を返す。
+   * 相手が先に保存していて番号が違えば保存せず null を返す。
    */
-  save(changes: {
-    meals?: readonly Meal[];
-    recipesDelete?: readonly string[];
-    shopping?: ShoppingListChanges;
-    markBackfilled?: boolean;
-  }): Promise<void>;
+  saveShoppingMemo(memo: ShoppingMemo, expectedVersion: number): Promise<number | null>;
+
+  /** 食事の変更（とレシピの削除）を 1 つのトランザクションで保存する。空になった食事は消す */
+  save(changes: { meals?: readonly Meal[]; recipesDelete?: readonly string[] }): Promise<void>;
 }

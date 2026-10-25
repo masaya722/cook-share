@@ -102,6 +102,29 @@ export default async function RecipePage({ params }: { params: Promise<{ id: str
           <p className="rounded-2xl bg-accent-soft p-4 leading-relaxed whitespace-pre-wrap">{recipe.memo}</p>
         </section>
       )}
+
+      {recipe.source_images?.length > 0 && (
+        <section className="mt-6">
+          <h2 className="mb-2 text-lg font-bold">元の画像</h2>
+          <ul className="grid grid-cols-3 gap-2">
+            {recipe.source_images
+              .filter((src) => /^https?:\/\//.test(src))
+              .map((src, i) => (
+                <li key={src}>
+                  <a href={src} target="_blank" rel="noreferrer" className="pressable block">
+                    {/* eslint-disable-next-line @next/next/no-img-element -- 保存した元の画像をそのまま見せる */}
+                    <img
+                      src={src}
+                      alt={`元の画像 ${i + 1}枚目`}
+                      loading="lazy"
+                      className="aspect-[3/4] w-full rounded-xl border border-border object-cover"
+                    />
+                  </a>
+                </li>
+              ))}
+          </ul>
+        </section>
+      )}
     </>
   );
 }

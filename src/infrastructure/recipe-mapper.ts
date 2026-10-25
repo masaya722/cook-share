@@ -42,6 +42,7 @@ export function toDomainRecipe(
       memo: row.memo,
       source: row.source_type ? sourceOfSavedRow(row.source_type, row.source_url ?? null) : undefined,
       imageUrl: row.image_url,
+      sourceImages: row.source_images ?? [],
     },
   });
 }
@@ -66,6 +67,7 @@ export function recipeFromDraft(id: string, draft: RecipeDraft): Recipe {
       memo: draft.memo,
       source: Source.of(draft.source_type, draft.source_url),
       imageUrl: draft.image_url,
+      sourceImages: draft.source_images ?? [],
     },
   });
 }
@@ -90,6 +92,7 @@ export function toRecipeRow(recipe: Recipe): RecipeDraft {
     source_type: c.source.kind,
     source_url: c.source.url,
     image_url: c.imageUrl,
+    source_images: [...c.sourceImages],
   };
 }
 

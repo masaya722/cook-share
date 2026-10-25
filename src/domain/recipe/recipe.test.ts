@@ -147,6 +147,18 @@ describe("レシピの中身", () => {
     expect(r.content.memo).toBeNull();
   });
 
+  it("元の画像は http(s) の URL だけ持つ", () => {
+    const r = Recipe.create({
+      id: "r1",
+      title: "カレー",
+      servings: Servings.assumed(),
+      ingredients: [],
+      content: { source: Source.of("image", null), sourceImages: ["https://example.com/a.jpg", "javascript:x", " "] },
+    });
+    expect(r.content.sourceImages).toEqual(["https://example.com/a.jpg"]);
+    expect(r.content.source.kind).toBe("image");
+  });
+
   it("出典がなければ手入力のレシピ", () => {
     const r = Recipe.create({ id: "r1", title: "カレー", servings: Servings.assumed(), ingredients: [] });
     expect(r.content.source).toEqual({ kind: "manual", url: null });

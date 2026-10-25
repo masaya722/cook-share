@@ -1,8 +1,8 @@
 import { DomainError } from "../shared/domain-error";
 
-export type SourceKind = "youtube" | "web" | "manual";
+export type SourceKind = "youtube" | "web" | "manual" | "image";
 
-/** 出典: レシピの元になった YouTube 動画や Web ページ。手入力なら URL はない */
+/** 出典: レシピの元になった YouTube 動画や Web ページ、写真（料理本のページ・スクリーンショット）。手入力と写真なら URL はない */
 export type Source = {
   readonly kind: SourceKind;
   readonly url: string | null;

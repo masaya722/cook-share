@@ -15,6 +15,8 @@ export type RecipeContent = {
   readonly memo: string | null;
   readonly source: Source;
   readonly imageUrl: string | null;
+  /** 写真から取り込んだときの元の画像（選んだ順） */
+  readonly sourceImages: readonly string[];
 };
 
 const textOrNull = (s: string | null | undefined) => s?.trim() || null;
@@ -51,6 +53,8 @@ export class Recipe {
       memo: textOrNull(c.memo),
       source: c.source ?? Source.manual(),
       imageUrl: textOrNull(c.imageUrl),
+      // R9: 元の画像は http(s) の URL だけ持つ
+      sourceImages: (c.sourceImages ?? []).map((u) => u.trim()).filter((u) => /^https?:\/\//i.test(u)),
     });
   }
 

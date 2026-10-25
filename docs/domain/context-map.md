@@ -15,7 +15,7 @@ flowchart TB
   subgraph Generic[汎用]
     Household[家族・ログイン<br/>Household]
   end
-  External[(YouTube / Web / Claude)]
+  External[(YouTube / Web / 写真 / Claude)]
 
   Import -- ACL: 外部の形式をレシピに翻訳 --> External
   Import -- レシピの下書きを渡す --> Recipe
@@ -31,7 +31,7 @@ flowchart TB
 | 献立 | 中核 | 食事ごとに何を食べるかを決める。作る人数・外食・残り物 | `src/domain/menu/`、`meals`・`dishes`・`leftovers` テーブル、`meal-calendar.tsx`・`meal-sheet.tsx` |
 | 買い出し | 中核 | 家族で共有する買い物リスト。食材も日用品も書く。献立との連動・書き足し・直し・区切りと並べ替え・チェック | `src/domain/shopping/`、`shopping_items` テーブル、`shopping-list.tsx` |
 | レシピ帳 | 支援 | レシピの保存・編集・検索・削除 | `src/domain/recipe/`、`recipes` テーブル、`recipe-form.tsx` など |
-| 取り込み | 支援 | 外部の情報をレシピの下書きに変換する（腐敗防止層）。基準人数と「食材・下ごしらえ」を分けて読み取る | `src/lib/import/` |
+| 取り込み | 支援 | 外部の情報（YouTube・Web ページ・写真）をレシピの下書きに変換する（腐敗防止層）。基準人数と「食材・下ごしらえ」を分けて読み取る | `src/lib/import/`、画像は Supabase Storage の `recipe-images` |
 | 家族・ログイン | 汎用 | 誰が使えるか | Supabase Auth、`members` テーブル |
 
 ## 中核に選んだ理由

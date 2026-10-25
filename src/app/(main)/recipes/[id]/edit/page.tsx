@@ -17,6 +17,7 @@ export default async function EditRecipePage({ params }: { params: Promise<{ id:
     source_url: recipe.source_url,
     source_type: recipe.source_type,
     image_url: recipe.image_url,
+    source_images: recipe.source_images ?? [],
     // 第 4 段階より前の文字列（「2人分」）が残っていても数値にして渡す
     servings:
       typeof recipe.servings === "string"

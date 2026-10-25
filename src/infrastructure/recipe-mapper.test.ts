@@ -57,6 +57,7 @@ describe("編集画面の入力を保存する形にする", () => {
     source_url: "https://example.com/shogayaki",
     source_type: "web",
     image_url: null,
+    source_images: [],
     servings: null,
     cook_time: "15分",
     description: null,

@@ -12,7 +12,7 @@ export type IngredientRow = {
   preparation?: string;
 };
 
-export type SourceType = "youtube" | "web" | "manual";
+export type SourceType = "youtube" | "web" | "manual" | "image";
 
 export type RecipeRow = {
   id: string;
@@ -20,6 +20,8 @@ export type RecipeRow = {
   source_url: string | null;
   source_type: SourceType;
   image_url: string | null;
+  /** 写真から取り込んだときの元の画像（公開 URL、選んだ順） */
+  source_images: string[];
   /** 基準人数。記載がなければ null（2 人分とみなす） */
   servings: number | null;
   cook_time: string | null;
@@ -45,6 +47,7 @@ export function emptyDraft(): RecipeDraft {
     source_url: null,
     source_type: "manual",
     image_url: null,
+    source_images: [],
     servings: null,
     cook_time: null,
     description: null,

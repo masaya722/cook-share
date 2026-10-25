@@ -144,7 +144,7 @@ M7 と M10 は複数の食事にまたがるので、食事のクラスではな
 | 集約 | テーブル | 保存のしかた |
 |---|---|---|
 | レシピ | `recipes`（材料は `ingredients` jsonb、基準人数は `servings` integer。null = 記載なし。元の画像は `source_images`） | `saveRecipe` ユースケースで、レシピの集約を通して保存。画像そのものは Supabase Storage の `recipe-images` に置く（[D5](decisions.md)） |
-| 食事 | `meals`（日付×食事区分で一意）・`dishes`・`leftovers` | 献立の変更を `save_meals_and_shopping` で 1 つのトランザクションとして保存（レシピ削除で外れる品も同じトランザクション） |
+| 食事 | `meals`（日付×食事区分で一意）・`dishes`・`leftovers` | 献立の変更を `save_meals` で 1 つのトランザクションとして保存（レシピ削除で外れる品も同じトランザクション） |
 | 買い物メモ | `shopping_memo`（家族で 1 枚なので 1 行だけ。文章・反映済みの品・版） | `save_shopping_memo` で、保存されている版が手元の版と同じときだけ保存する。違えば行単位でまとめて保存し直す（[D6](decisions.md)）。2 人の画面には Supabase Realtime で反映 |
 
 古い形式のデータ（下ごしらえが食材名に混ざった材料、文字列の基準人数）は、`src/infrastructure/recipe-mapper.ts` が読むときに新しい形に直す。

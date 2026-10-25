@@ -137,7 +137,7 @@ export class SupabaseStore implements Store {
   async save(changes: Parameters<Store["save"]>[0]) {
     const meals = changes.meals ?? [];
     check(
-      await this.db.rpc("save_meals_and_shopping", {
+      await this.db.rpc("save_meals", {
         changes: {
           meals_save: meals
             .filter((m) => !m.isEmpty)

@@ -289,8 +289,11 @@ function MemoEditor({ text, onChange, onBlur }: { text: string; onChange: (text:
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    // 測り直す間だけ入力欄が縮んでページが短くなり、画面が上に飛ぶので、スクロールの位置を戻す
+    const scrollY = window.scrollY;
     el.style.height = "auto";
     el.style.height = `${Math.max(el.scrollHeight, 240)}px`;
+    window.scrollTo({ top: scrollY });
     if (caret.current !== null) {
       el.setSelectionRange(caret.current, caret.current);
       caret.current = null;

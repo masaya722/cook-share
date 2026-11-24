@@ -359,9 +359,8 @@ function MemoEditor({ text, onChange, onBlur }: { text: string; onChange: (text:
             replace(el, el.selectionStart, el.selectionStart, insert, el.selectionStart + insert.length);
           }
         }}
-        placeholder={`思いついた物を自由に書く\n例:\n🛒 スーパー\n${OPEN_BOX} 牛乳 2本\n${OPEN_BOX} 卵\n\n💊 ドラッグストア\n${OPEN_BOX} 靴洗剤`}
         aria-label="買い物メモ"
-        className="block min-h-60 w-full resize-none rounded-b-2xl bg-transparent px-4 py-3 leading-7 outline-none placeholder:text-muted"
+        className="block min-h-60 w-full resize-none rounded-b-2xl bg-transparent px-4 py-3 leading-7 outline-none"
       />
     </div>
   );

@@ -1,9 +1,31 @@
 "use client";
 
+import { type AuthError, isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { Spinner, buttonClass, inputClass } from "@/components/ui";
 import { createClient } from "@/lib/supabase/client";
+
+/** ログインできなかった本当の理由を、次に何をすればよいか分かる言葉にする */
+function loginErrorMessage(error: AuthError): string {
+  switch (error.code) {
+    case "invalid_credentials":
+      return "メールアドレスかパスワードが違います";
+    case "over_request_rate_limit":
+      return "ログインを何度も試したため、しばらく止められています。10〜15分待ってから試してください";
+    case "email_not_confirmed":
+      return "メールアドレスの確認が済んでいません";
+    case "user_banned":
+      return "このアカウントは使えなくなっています";
+  }
+  if (error.status === 429) {
+    return "ログインを何度も試したため、しばらく止められています。10〜15分待ってから試してください";
+  }
+  if (isAuthRetryableFetchError(error)) {
+    return "通信できませんでした。電波の状況を確認して、もう一度試してください";
+  }
+  return `ログインできませんでした（${error.code ?? error.status ?? error.message}）`;
+}
 
 function LoginForm() {
   const searchParams = useSearchParams();
@@ -18,7 +40,7 @@ function LoginForm() {
     setError(null);
     const { error } = await createClient().auth.signInWithPassword({ email, password });
     if (error) {
-      setError("メールアドレスかパスワードが違います");
+      setError(loginErrorMessage(error));
       setLoading(false);
       return;
     }

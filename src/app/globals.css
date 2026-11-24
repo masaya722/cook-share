@@ -1,26 +1,27 @@
 @import "tailwindcss";
 
 :root {
-  --background: #fbf7f2;
-  --surface: #ffffff;
-  --foreground: #2b2522;
-  --muted: #8a7f78;
-  --border: #ece4dc;
-  --accent: #d9603b;
-  --accent-soft: #fbe6dc;
-  --accent-foreground: #ffffff;
+  /* 発表資料（うちのレシピ発表）と同じ配色: クリームの地、ラズベリー色、こげ茶の文字 */
+  --background: #fff8f3;
+  --surface: #fffdfb;
+  --foreground: #4a2a30;
+  --muted: #7a5257;
+  --border: #f1d8d2;
+  --accent: #a53a51;
+  --accent-soft: #fce9e2;
+  --accent-foreground: #fff8f3;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #1a1715;
-    --surface: #25211e;
-    --foreground: #f1ebe6;
-    --muted: #a89d95;
-    --border: #3a342f;
-    --accent: #ec7a55;
-    --accent-soft: #43291f;
-    --accent-foreground: #1a1715;
+    --background: #211719;
+    --surface: #2d2023;
+    --foreground: #f8e9e6;
+    --muted: #c4a5a9;
+    --border: #46323a;
+    --accent: #e57d93;
+    --accent-soft: #4a2a30;
+    --accent-foreground: #211719;
   }
 }
 

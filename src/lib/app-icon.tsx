@@ -24,7 +24,7 @@ export function renderAppIcon(size: number) {
           height: "100%",
           display: "flex",
           position: "relative",
-          background: "#d9603b",
+          background: "#a53a51",
         }}
       >
         {steam(36)}
@@ -39,7 +39,7 @@ export function renderAppIcon(size: number) {
             height: 32 * u,
             borderBottomLeftRadius: 30 * u,
             borderBottomRightRadius: 30 * u,
-            background: "#fbf7f2",
+            background: "#fff8f3",
           }}
         />
         <div
@@ -50,7 +50,7 @@ export function renderAppIcon(size: number) {
             width: 68 * u,
             height: 6 * u,
             borderRadius: 3 * u,
-            background: "#fbf7f2",
+            background: "#fff8f3",
           }}
         />
       </div>

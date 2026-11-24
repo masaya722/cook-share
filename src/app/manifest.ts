@@ -7,8 +7,8 @@ export default function manifest(): MetadataRoute.Manifest {
     description: "夫婦で共有するレシピ帳",
     start_url: "/",
     display: "standalone",
-    background_color: "#fbf7f2",
-    theme_color: "#fbf7f2",
+    background_color: "#fff8f3",
+    theme_color: "#fff8f3",
     icons: [
       { src: "/icons/192", sizes: "192x192", type: "image/png" },
       { src: "/icons/512", sizes: "512x512", type: "image/png" },
